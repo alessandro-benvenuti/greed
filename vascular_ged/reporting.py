@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -20,7 +21,46 @@ def _rows(paths) -> list[dict[str, str]]:
 
 
 def analyze_pilot(shard_dir: str | Path, report_root: str | Path) -> dict[str, object]:
+    report_root = Path(report_root)
     all_rows = _rows(sorted(Path(shard_dir).glob("*.csv")))
+    manifest = _rows([report_root / "manifests/pilot_pairs.csv"])
+    pair_ids = [row["pair_id"] for row in manifest]
+    if not pair_ids or len(set(pair_ids)) != len(pair_ids):
+        raise ValueError("pilot manifest is empty or contains duplicate pair IDs")
+    expected = {
+        (pair_id, cost, solver, timeout)
+        for pair_id in pair_ids
+        for cost in ("vascular_3d_raw_v1", "vascular_3d_sqrt3_v1")
+        for solver, timeout in (("f2", 10), ("f2", 60), ("f2", 300), ("branch", 0))
+    }
+    actual_keys = [
+        (row["pair_id"], row["cost_config_id"], row["solver"], int(row["time_limit_seconds"]))
+        for row in all_rows
+    ]
+    if len(set(actual_keys)) != len(actual_keys):
+        raise ValueError("pilot results contain duplicate pair/configuration rows")
+    actual = set(actual_keys)
+    if actual != expected:
+        raise ValueError(f"pilot result mismatch: {len(expected - actual)} missing, {len(actual - expected)} extra")
+    for row in all_rows:
+        if row["solver_status"] == "failed":
+            if not row["failure_message"]:
+                raise ValueError(f"failed pilot row lacks a failure message: {row['pair_id']}")
+            continue
+        lower, upper = float(row["lower_bound"]), float(row["upper_bound"])
+        runtime = float(row["runtime_seconds"])
+        absolute_gap = float(row["absolute_bound_gap"])
+        relative_gap = float(row["relative_bound_gap"])
+        if not all(math.isfinite(value) for value in (lower, upper, runtime, absolute_gap, relative_gap)):
+            raise ValueError(f"pilot row contains non-finite values: {row['pair_id']}")
+        if lower > upper or runtime < 0 or not math.isclose(absolute_gap, upper - lower, abs_tol=1e-9):
+            raise ValueError(f"pilot row contains inconsistent bounds or runtime: {row['pair_id']}")
+        expected_relative = absolute_gap / upper if upper else 0.0
+        if not math.isclose(relative_gap, expected_relative, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(f"pilot row contains an inconsistent relative gap: {row['pair_id']}")
+        declared_exact = row["is_exact"].lower() in {"true", "1"}
+        if declared_exact != (absolute_gap <= 1e-9):
+            raise ValueError(f"pilot row contains an inconsistent exact flag: {row['pair_id']}")
     rows = [row for row in all_rows if row["solver_status"] != "failed"]
     if not rows:
         raise ValueError("pilot has no successful rows")
@@ -42,9 +82,9 @@ def analyze_pilot(shard_dir: str | Path, report_root: str | Path) -> dict[str, o
             "ged_size_correlation": float(np.corrcoef(uppers, sizes)[0, 1]) if len(group) > 1 else None,
             "similarity_exp_minus_lambda_ged": similarities,
         }
-    metrics = {"successful_rows": len(rows), "failed_rows": len(_rows(sorted(Path(shard_dir).glob("*.csv")))) - len(rows), "configurations": configurations,
+    metrics = {"successful_rows": len(rows), "failed_rows": len(all_rows) - len(rows), "configurations": configurations,
                "production_worst_case_cpu_hours_at_300_seconds": 10000 * 300 / 3600}
-    report_root = Path(report_root); (report_root / "reports").mkdir(parents=True, exist_ok=True)
+    (report_root / "reports").mkdir(parents=True, exist_ok=True)
     write_csv(report_root / "results/pilot/pilot_ged_results.csv", all_rows, list(all_rows[0]))
     write_json(report_root / "reports/solver_scaling_metrics.json", metrics)
     lines = ["# Solver scaling report", "", "This report compares F2/BRANCH, coordinate scaling, and 10/60/300-second limits.", "",
