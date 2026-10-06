@@ -35,3 +35,17 @@ def test_compiled_wrapper_rejects_invalid_data_and_normalizes_edges():
     duplicate = ([[0, 0, 0], [.2, 0, 0]], [[0, 0], [0, 1], [1, 0], [0, 1]])
     simple = ([[0, 0, 0], [.2, 0, 0]], [[0, 1]])
     assert solve(*duplicate, *simple) == pytest.approx(0)
+
+
+def test_compiled_wrapper_rejects_invalid_costs():
+    graph = ([[0, 0, 0]], [])
+    for coordinate_scale, node_cost, edge_cost, message in (
+        (0.0, 1.0, 1.0, "coordinate_scale"),
+        (1.0, -1.0, 1.0, "node_cost"),
+        (1.0, 1.0, math.nan, "edge_cost"),
+    ):
+        with pytest.raises(Exception, match=message):
+            pyged.geometric_ged(
+                graph, graph, "f2", "--time-limit 10 --threads 1",
+                coordinate_scale, node_cost, edge_cost,
+            )

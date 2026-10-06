@@ -94,6 +94,12 @@ public:
 		if (!std::isfinite(coordinate_scale_) || coordinate_scale_ <= 0) {
 			throw std::invalid_argument("coordinate_scale must be finite and positive");
 		}
+		if (!std::isfinite(node_cost_) || node_cost_ < 0) {
+			throw std::invalid_argument("node_cost must be finite and non-negative");
+		}
+		if (!std::isfinite(edge_cost_) || edge_cost_ < 0) {
+			throw std::invalid_argument("edge_cost must be finite and non-negative");
+		}
 	}
 	double node_ins_cost_fun(const GeometricNodeLabel&) const { return node_cost_; }
 	double node_del_cost_fun(const GeometricNodeLabel&) const { return node_cost_; }
