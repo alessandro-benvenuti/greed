@@ -3,6 +3,7 @@ set -euo pipefail
 module purge
 module load gcc/11.5.0
 module load git/2.53.0
+module load boost/1.86.0
 module load cmake/3.31.4
 module load gurobi/13.0.1
 export SYNTHETIC_MRI_DATASET=/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary

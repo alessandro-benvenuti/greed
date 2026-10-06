@@ -12,8 +12,8 @@ if ! git apply --reverse --check "$patch_file" 2>/dev/null; then
   echo "GEDLIB bound patch is not applied. Re-run source staging on the login node." >&2
   exit 1
 fi
-if [[ ! -d ext/boost_1_82_0 ]]; then
-  echo "Boost sources are not staged. Re-run source staging on the login node." >&2
+if [[ -z "${BOOST_ROOT:-}" || ! -f "$BOOST_ROOT/include/boost/version.hpp" ]]; then
+  echo "BOOST_ROOT does not identify a usable Boost module; load boost/1.86.0" >&2
   exit 1
 fi
 python install.py

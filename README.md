@@ -33,10 +33,11 @@ We recommend using a `conda` environment for installation.
     git clone --branch v1.0 --depth 1 https://github.com/dbblumenthal/gedlib
     cd gedlib
     python install.py
-    cd ext
-    wget https://boostorg.jfrog.io/artifactory/main/release/1.82.0/source/boost_1_82_0.tar.gz
-    tar -xzf boost_1_82_0.tar.gz
     ```
+
+    On Jean Zay, use the provided `boost/1.86.0` module; do not unpack a
+    Boost source tree into the project quota. On other systems, expose a
+    compatible installation through `BOOST_ROOT`.
 
 	2.2. Install [Gurobi 9.1.1](https://support.gurobi.com/hc/en-us/articles/360054352391-Gurobi-9-1-1-released) at `pyged/ext/gurobi911`. Later versions can be used with suitable naming changes. _Gurobi_ requires a licence. Free academic licenses are available. _Gurobi_ is required for ground truth SED computation. Alternatively, one could use one of the non-MIP methods available in _GEDLIB_ or use the generated data provided by us. To build without _Gurobi_, comment out `#define GUROBI` in `pyged/src/pyged.cpp`.
 

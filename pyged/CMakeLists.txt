@@ -9,6 +9,10 @@ if(NOT DEFINED ENV{GUROBI_HOME})
 	message(FATAL_ERROR "GUROBI_HOME is not set. Load the Jean Zay gurobi module first.")
 endif()
 set(GUROBI_HOME "$ENV{GUROBI_HOME}" CACHE PATH "Gurobi installation root")
+if(NOT DEFINED ENV{BOOST_ROOT})
+	message(FATAL_ERROR "BOOST_ROOT is not set. Load the Jean Zay boost/1.86.0 module first.")
+endif()
+find_path(BOOST_INCLUDE_DIR boost/version.hpp HINTS "$ENV{BOOST_ROOT}/include" REQUIRED NO_DEFAULT_PATH)
 find_path(GUROBI_INCLUDE_DIR gurobi_c.h HINTS "${GUROBI_HOME}/include" REQUIRED)
 find_library(GUROBI_CXX_LIBRARY NAMES gurobi_c++ HINTS "${GUROBI_HOME}/lib" REQUIRED NO_DEFAULT_PATH)
 file(GLOB GUROBI_C_LIBRARIES "${GUROBI_HOME}/lib/libgurobi[0-9][0-9]*${CMAKE_SHARED_LIBRARY_SUFFIX}")
@@ -20,6 +24,7 @@ endif()
 math(EXPR GUROBI_LAST_LIBRARY "${GUROBI_LIBRARY_COUNT} - 1")
 list(GET GUROBI_C_LIBRARIES ${GUROBI_LAST_LIBRARY} GUROBI_C_LIBRARY)
 message(STATUS "Using Gurobi include: ${GUROBI_INCLUDE_DIR}")
+message(STATUS "Using Boost include: ${BOOST_INCLUDE_DIR}")
 message(STATUS "Using Gurobi C++ library: ${GUROBI_CXX_LIBRARY}")
 message(STATUS "Using Gurobi C library: ${GUROBI_C_LIBRARY}")
 
@@ -34,7 +39,7 @@ target_compile_options(pyged PUBLIC
 
 target_include_directories(pyged PUBLIC
 	${CMAKE_SOURCE_DIR}/ext/gedlib
-	${CMAKE_SOURCE_DIR}/ext/gedlib/ext/boost_1_82_0
+	${BOOST_INCLUDE_DIR}
 	${CMAKE_SOURCE_DIR}/ext/gedlib/ext/eigen.3.3.4/Eigen
 	${CMAKE_SOURCE_DIR}/ext/gedlib/ext/nomad.3.8.1/src
 	${CMAKE_SOURCE_DIR}/ext/gedlib/ext/nomad.3.8.1/ext/sgtelib/src
