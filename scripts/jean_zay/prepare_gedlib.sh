@@ -16,4 +16,18 @@ if [[ -z "${BOOST_ROOT:-}" || ! -f "$BOOST_ROOT/include/boost/version.hpp" ]]; t
   echo "BOOST_ROOT does not identify a usable Boost module; load boost/1.86.0" >&2
   exit 1
 fi
+dependencies_ready() {
+  compgen -G 'ext/fann.2.2.0/lib/libdoublefann.so*' >/dev/null \
+    && [[ -f ext/nomad.3.8.1/lib/libnomad.so ]] \
+    && [[ -f ext/libsvm.3.22/libsvm.so ]]
+}
+if ! dependencies_ready; then
+  # GEDLIB's installer writes this marker even when a subprocess fails.
+  # Remove only the generated marker so an interrupted build is retried.
+  rm -f ext/.INSTALLED
+fi
 python install.py
+if ! dependencies_ready; then
+  echo "GEDLIB dependency build did not produce doublefann, nomad, and libsvm libraries" >&2
+  exit 1
+fi
