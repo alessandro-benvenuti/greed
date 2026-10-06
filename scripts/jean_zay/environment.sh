@@ -21,6 +21,7 @@ export VIRTUAL_ENV="$GREED_ENV"
 export PATH="$GREED_ENV/bin:$PATH"
 unset PYTHONHOME
 hash -r
+export PYTHONPATH="$GREED_REPOSITORY/pyged/lib${PYTHONPATH:+:$PYTHONPATH}"
 gedlib_library_path="$GREED_REPOSITORY/pyged/ext/gedlib/ext/nomad.3.8.1/lib:$GREED_REPOSITORY/pyged/ext/gedlib/ext/libsvm.3.22:$GREED_REPOSITORY/pyged/ext/gedlib/ext/fann.2.2.0/lib"
 export LD_LIBRARY_PATH="${gedlib_library_path}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 unset gedlib_library_path
