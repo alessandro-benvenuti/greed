@@ -1,0 +1,5 @@
+methods: [f2, branch]
+time_limits_seconds: [10, 60, 300]
+threads_per_pair: 1
+coordinate_scales: [1.0, 1.7320508075688772]
+pair_count: 18

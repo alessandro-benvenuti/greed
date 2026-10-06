@@ -1,0 +1,10 @@
+id: vascular_3d_sqrt3_v1
+coordinate_order: [d, h, w]
+coordinate_scale: 1.7320508075688772
+node_relabel: euclidean_distance_divided_by_coordinate_scale
+node_insertion_deletion: 1.0
+edge_relabel: 0.0
+edge_insertion_deletion: 1.0
+undirected: true
+self_loop_policy: drop
+duplicate_edge_policy: collapse

@@ -1,0 +1,14 @@
+diff --git a/src/methods/mip_based_method.ipp b/src/methods/mip_based_method.ipp
+index 1ad5878..658fca7 100644
+--- a/src/methods/mip_based_method.ipp
++++ b/src/methods/mip_based_method.ipp
+@@ -83,6 +83,9 @@ MIPBasedMethod<UserNodeLabel, UserEdgeLabel>::
+ 			if (model_status == GRB_OPTIMAL) {
+ 				result.set_lower_bound(model.get(GRB_DoubleAttr_ObjVal));
+ 			}
++			else {
++				result.set_lower_bound(model.get(GRB_DoubleAttr_ObjBound));
++			}
+ 			if (not relax_) {
+ 				result.add_node_map(g.num_nodes(), h.num_nodes());
+ 				mip_model_to_node_map_(g, h, model, result.node_map(0));

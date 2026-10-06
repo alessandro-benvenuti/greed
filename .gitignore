@@ -1,2 +1,13 @@
 .ipynb_checkpoints
 __pycache__
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+pyged/ext/
+pyged/lib/
+GED_computations/
+*.pt
+*.log

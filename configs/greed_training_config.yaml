@@ -1,0 +1,21 @@
+seed: 161803
+dataset_root: ${SYNTHETIC_MRI_DATASET}
+train_labels: ${GED_COMPUTATIONS_ROOT}/results/production/ged_labels_train.csv
+validation_labels: ${GED_COMPUTATIONS_ROOT}/results/production/ged_labels_validation.csv
+patient_split: ${GED_COMPUTATIONS_ROOT}/metadata/patient_split.csv
+cost_config_path: configs/cost_config.yaml
+cost_config_id: vascular_3d_raw_v1
+output_dir: ${GED_COMPUTATIONS_ROOT}/checkpoints/greed_3d_pilot
+model:
+  layers: 8
+  input_dim: 3
+  hidden_dim: 64
+  embedding_dim: 64
+  pooling: sum
+batch_size: 32
+workers: 4
+epochs: 100
+learning_rate: 0.001
+weight_decay: 0.00001
+checkpoint_metric: validation_interval_loss
+augmentation: none

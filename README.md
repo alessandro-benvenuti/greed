@@ -74,6 +74,88 @@ Check out the experiment notebooks at [greed-expts](https://github.com/rishabh-r
 
 If you face any difficulties in using this repo feel free to raise a GitHub issue (recommended) or reach out via email at rishabhranjan0207@gmail.com. I am unable to respond to queries sent to rishabh.ranjan.cs118@cse.iitd.ac.in in a timely manner.
 
+## Normalized 3D vascular GED workflow
+
+The `3d-vascular-geometric-ged` branch adds a reproducible path for SyntheticMRI
+vascular graphs. It never reads RelationFormer validation/test graphs and does
+not modify that repository. Points retain their stored canonical `[D,H,W]`
+column order. The primary costs are node relabel `||p_i-p_j||_2`, node and edge
+insertion/deletion `1`, and edge relabel `0`. Graphs are undirected and simple:
+self-loops are dropped and duplicate/reverse-duplicate edges are collapsed.
+
+```bash
+export SYNTHETIC_MRI_DATASET=/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary
+export GED_COMPUTATIONS_ROOT=/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/GED_computations
+vascular-ged audit --output-root "$GED_COMPUTATIONS_ROOT"
+vascular-ged split --output-root "$GED_COMPUTATIONS_ROOT" --seed 314159
+vascular-ged sample --output-root "$GED_COMPUTATIONS_ROOT" --seed 271828
+```
+
+Only `train/vtp` is eligible. Whole patients are assigned with a stable SHA-256
+ordering before pairs are sampled. The sampler creates exactly 8,000 training
+and 2,000 validation pairs separately, using corresponding-region,
+log-size-matched, and unrestricted strategies over small/medium/large strata.
+Paths are dataset-relative. Empty graphs are audited but excluded from this
+first experiment; their analytic distance is `|V|+|E|`. A complete pairwise
+matrix is never generated.
+
+### Jean Zay
+
+Clone this branch at `$WORK/projects/greed`, install a maintained environment
+with `pip install -e '.[train]'`, and run all compilation/solver work via Slurm:
+
+```bash
+source scripts/jean_zay/environment.sh
+sinfo -o '%P %l %a' | grep qos_cpu-t4
+sbatch scripts/jean_zay/verify_environment.sbatch
+sbatch --dependency=afterok:<verify-job> scripts/jean_zay/audit_and_sample.sbatch
+sbatch --dependency=afterok:<data-job> scripts/jean_zay/pilot.sbatch
+```
+
+The verification job records the environment, runs a real compute-node Gurobi
+optimization, discovers Gurobi 13 through `GUROBI_HOME`, and builds/imports the
+wrapper. The pilot runs 18 representative pairs with F2 and BRANCH at
+10/60/300 seconds for raw and `sqrt(3)` scaling. Analyze it with:
+
+```bash
+vascular-ged analyze-pilot --shard-dir "$GED_COMPUTATIONS_ROOT/results/pilot/shards" --output-root "$GED_COMPUTATIONS_ROOT"
+```
+
+Do not submit production until the licence/build/stock-F2 smoke tests,
+handcrafted tests, finite ordered pilot bounds, timeout ceiling (300 seconds),
+CPU ceiling (833.34 hours), and concurrency checks all pass. Then record the
+selected setup and submit the resumable 25-pair array:
+
+```bash
+sbatch scripts/jean_zay/production_array.sbatch
+```
+
+Each task uses one solver thread and one atomic shard. `vascular-ged merge`
+rejects missing/extra/duplicate pairs, crossed patients, missing graphs,
+non-finite or inverted bounds, malformed exact rows, and inconsistent configs.
+The authoritative outputs are `ged_labels_train.csv`,
+`ged_labels_validation.csv`, and their validated concatenation
+`ged_labels_all.csv`. Use `vascular-ged label-summary` for the hash-bearing
+summary. Generated artifacts, logs, environments, and checkpoints stay below
+`GED_COMPUTATIONS_ROOT` and outside Git.
+
+### Model and later integration
+
+The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses
+64 hidden/embedding dimensions, sum pooling, and Euclidean embedding distance,
+which guarantees symmetry, non-negativity, zero self-distance, and
+pair-independent embeddings. Exact rows regress to their point label; bounded
+rows use `ReLU(lower-prediction)^2 + ReLU(prediction-upper)^2`, never a midpoint.
+Canonical unaugmented coordinates are used for labels and this initial training;
+pair members are not independently rotated. Start the CPU pilot with
+`sbatch scripts/jean_zay/train_cpu.sbatch`.
+
+For later RelationFormer integration, load the learned encoder in the other
+repository and place prediction and GT in the same augmented coordinate frame.
+This branch intentionally keeps hard GT adjacency. Its encoder boundary can
+later accept weighted message passing without changing the label definition;
+soft-graph integration is not implemented here.
+
 ## Citation
 
 ```bibtex
@@ -86,4 +168,3 @@ If you face any difficulties in using this repo feel free to raise a GitHub issu
   year = {2022},
 }
 ```
-

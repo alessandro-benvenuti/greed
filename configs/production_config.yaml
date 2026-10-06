@@ -1,0 +1,7 @@
+method: f2
+time_limit_seconds: 300
+threads_per_pair: 1
+chunk_size: 25
+array_concurrency: 32
+reuse_compatible_pilot_results: true
+# This file is a safe template. Replace timeout/concurrency only after pilot analysis.
