@@ -12,8 +12,11 @@ mkdir -p "$GED_COMPUTATIONS_ROOT/metadata" "$GED_COMPUTATIONS_ROOT/logs"
 cd "$GREED_REPOSITORY"
 scripts/jean_zay/prepare_gedlib.sh
 python scripts/jean_zay/record_environment.py > "$GED_COMPUTATIONS_ROOT/metadata/software_versions.json"
-python scripts/jean_zay/gurobi_smoke.py
-gurobi_c_library=$(find "$GUROBI_HOME/lib" -maxdepth 1 -name 'libgurobi[0-9]*.so' | sort -V | tail -1)
+gurobi_c_library=$(find "$GUROBI_HOME/lib" -maxdepth 1 -name 'libgurobi[0-9]*.so' ! -name '*_light.so' | sort -V | tail -1)
+if [[ -z "$gurobi_c_library" ]]; then
+  echo "No full Gurobi C library found under $GUROBI_HOME/lib" >&2
+  exit 1
+fi
 gurobi_link_name=$(basename "$gurobi_c_library" .so)
 gurobi_link_name=${gurobi_link_name#lib}
 g++ scripts/jean_zay/gurobi_smoke.cpp -std=c++17 -I"$GUROBI_HOME/include" -L"$GUROBI_HOME/lib" \
