@@ -7,7 +7,7 @@
 #SBATCH --time=00:15:00
 #SBATCH --output=%x-%j.log
 set -euo pipefail
-source "$(dirname "$0")/environment.sh"
+source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
 mkdir -p "$GED_COMPUTATIONS_ROOT/metadata" "$GED_COMPUTATIONS_ROOT/logs"
 cd "$GREED_REPOSITORY"
 scripts/jean_zay/prepare_gedlib.sh

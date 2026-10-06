@@ -7,7 +7,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --output=%x-%j.log
 set -euo pipefail
-source "$(dirname "$0")/environment.sh"
+source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
 cd "$GREED_REPOSITORY"
 production="$GED_COMPUTATIONS_ROOT/results/production"
 vascular-ged merge --manifest "$GED_COMPUTATIONS_ROOT/manifests/greed_train_pairs.csv" \

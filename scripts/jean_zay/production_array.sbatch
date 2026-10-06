@@ -8,7 +8,7 @@
 #SBATCH --array=0-399%32
 #SBATCH --output=%x-%A_%a.log
 set -euo pipefail
-source "$(dirname "$0")/environment.sh"
+source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
 cd "$GREED_REPOSITORY"
 chunk_size=25
 start=$((SLURM_ARRAY_TASK_ID * chunk_size))

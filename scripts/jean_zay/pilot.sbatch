@@ -8,7 +8,7 @@
 #SBATCH --array=0-17%8
 #SBATCH --output=%x-%A_%a.log
 set -euo pipefail
-source "$(dirname "$0")/environment.sh"
+source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
 cd "$GREED_REPOSITORY"
 shard_complete() { [[ -f "$1" ]] && [[ $(wc -l < "$1") -eq 2 ]]; }
 for cost in raw sqrt3; do

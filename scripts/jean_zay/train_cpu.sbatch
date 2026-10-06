@@ -8,6 +8,6 @@
 #SBATCH --time=20:00:00
 #SBATCH --output=%x-%j.log
 set -euo pipefail
-source "$(dirname "$0")/environment.sh"
+source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
 cd "$GREED_REPOSITORY"
 vascular-ged train --config configs/greed_training_config.yaml
