@@ -107,6 +107,7 @@ with `pip install -e '.[train]'`, and run all compilation/solver work via Slurm:
 ```bash
 source scripts/jean_zay/environment.sh
 sinfo -o '%P %l %a' | grep qos_cpu-t4
+scripts/jean_zay/stage_gedlib_sources.sh  # login node: network staging only
 sbatch scripts/jean_zay/verify_environment.sbatch
 sbatch --dependency=afterok:<verify-job> scripts/jean_zay/audit_and_sample.sbatch
 sbatch --dependency=afterok:<data-job> scripts/jean_zay/pilot.sbatch
