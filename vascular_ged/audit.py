@@ -39,7 +39,9 @@ def _components(n: int, edges: np.ndarray) -> int:
     return len({find(i) for i in range(n)})
 
 
-def _audit_graph(task: tuple[str, GraphRecord]) -> tuple[dict[str, int], int, int, list[float] | None, list[float] | None]:
+def _audit_graph(
+    task: tuple[str, GraphRecord],
+) -> tuple[str, dict[str, int], int, int, int, int, list[float] | None, list[float] | None]:
     root_text, record = task
     root = Path(root_text)
     train_root = (root / "train/vtp").resolve()
@@ -76,7 +78,10 @@ def _audit_graph(task: tuple[str, GraphRecord]) -> tuple[dict[str, int], int, in
     counts["actual_empty_graphs"] = int(graph.num_nodes == 0)
     components = _components(graph.num_nodes, graph.edges) if graph.num_nodes else 0
     beta1 = graph.num_edges - graph.num_nodes + components
-    return counts, components, beta1, coordinate_min, coordinate_max
+    return (
+        record.sample_id, counts, graph.num_nodes, graph.num_edges,
+        components, beta1, coordinate_min, coordinate_max,
+    )
 
 
 def audit(
@@ -94,6 +99,9 @@ def audit(
     components, beta1 = [], []
     coordinate_min: np.ndarray | None = None
     coordinate_max: np.ndarray | None = None
+    node_count_corrections: dict[str, int] = {}
+    edge_count_corrections: dict[str, int] = {}
+    records_by_sample = {record.sample_id: record for record in records}
     per_patient: dict[str, list[int]] = defaultdict(list)
     per_patch: dict[str, list[int]] = defaultdict(list)
     for record in records:
@@ -107,9 +115,15 @@ def audit(
         pool = multiprocessing.Pool(processes=min(workers, len(records)))
         results = pool.imap_unordered(_audit_graph, tasks, chunksize=64)
     try:
-        for index, (counts, component_count, cycle_rank, graph_min, graph_max) in enumerate(results, start=1):
+        for index, result in enumerate(results, start=1):
+            sample_id, counts, actual_nodes, actual_edges, component_count, cycle_rank, graph_min, graph_max = result
             for key, value in counts.items():
                 topology[key] += value
+            record = records_by_sample[sample_id]
+            if actual_nodes != record.node_count:
+                node_count_corrections[sample_id] = actual_nodes
+            if actual_edges != record.edge_count:
+                edge_count_corrections[sample_id] = actual_edges
             components.append(component_count)
             beta1.append(cycle_rank)
             if graph_min is not None:
@@ -148,6 +162,8 @@ def audit(
         "coordinate_min_dhw": coordinate_min.tolist() if coordinate_min is not None else [None] * 3,
         "coordinate_max_dhw": coordinate_max.tolist() if coordinate_max is not None else [None] * 3,
         "generation_metadata": generation_metadata,
+        "normalized_node_count_corrections": node_count_corrections,
+        "normalized_edge_count_corrections": edge_count_corrections,
         **topology,
         "graph_size_by_patient": {key: _summary(value) for key, value in sorted(per_patient.items())},
         "graph_size_by_patch_index": {key: _summary(value) for key, value in sorted(per_patch.items())},

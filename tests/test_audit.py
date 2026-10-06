@@ -42,3 +42,16 @@ def test_audit_rejects_paths_outside_training_vtp(tmp_path: Path):
     record = GraphRecord("outside", "patient", "0", "val/vtp/graph.vtp", 3, 2)
     with pytest.raises(FileNotFoundError, match="train/vtp"):
         audit([record], root, patch_index)
+
+
+def test_audit_records_normalized_edge_count_correction(tmp_path: Path):
+    root, patch_index, _ = _dataset(tmp_path)
+    path = root / "train/vtp/duplicate.vtp"
+    text = (Path(__file__).parent / "fixtures/line_dhw.vtp").read_text(encoding="utf-8")
+    text = text.replace("0 1 1 2", "0 1 1 0 1 2").replace("2 4</DataArray>", "2 4 6</DataArray>")
+    path.write_text(text, encoding="utf-8")
+    record = GraphRecord("duplicate", "patient", "0", "train/vtp/duplicate.vtp", 3, 3)
+    report = audit([record], root, patch_index)
+    assert report["duplicate_edges"] == 1
+    assert report["edge_count_mismatches"] == 1
+    assert report["normalized_edge_count_corrections"] == {"duplicate": 2}

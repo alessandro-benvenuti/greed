@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from .atomic import write_json
@@ -61,6 +63,29 @@ def main(argv: list[str] | None = None) -> None:
     records = load_patch_index(patch_index)
     if args.command == "audit": write_audit(output, audit(records, dataset, patch_index, args.workers)); return
     if args.command == "split": write_patient_split(output / "metadata/patient_split.csv", patient_split(records, args.seed), args.seed); return
+    audit_path = output / "metadata/dataset_audit.json"
+    if not audit_path.is_file():
+        raise FileNotFoundError("dataset audit must complete before pair sampling")
+    audit_report = json.loads(audit_path.read_text(encoding="utf-8"))
+    if audit_report["dataset_root"] != str(dataset.resolve()):
+        raise ValueError("dataset audit root does not match the sampling dataset")
+    patch_index_sha256 = hashlib.sha256(patch_index.read_bytes()).hexdigest()
+    if audit_report["patch_index_sha256"] != patch_index_sha256:
+        raise ValueError("dataset audit refers to a different patch_index.csv")
+    node_corrections = audit_report.get("normalized_node_count_corrections", {})
+    edge_corrections = audit_report.get("normalized_edge_count_corrections", {})
+    known_samples = {record.sample_id for record in records}
+    unknown_corrections = (set(node_corrections) | set(edge_corrections)) - known_samples
+    if unknown_corrections:
+        raise ValueError(f"dataset audit contains {len(unknown_corrections)} unknown sample corrections")
+    records = [
+        replace(
+            record,
+            node_count=int(node_corrections.get(record.sample_id, record.node_count)),
+            edge_count=int(edge_corrections.get(record.sample_id, record.edge_count)),
+        )
+        for record in records
+    ]
     split_file = Path(args.split_file) if args.split_file else output / "metadata/patient_split.csv"
     assignment, _ = read_patient_split(split_file)
     record_patients = {record.patient_id for record in records}
