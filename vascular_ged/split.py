@@ -36,6 +36,10 @@ def read_patient_split(path: str | Path) -> tuple[dict[str, str], int]:
     if len(seeds) != 1:
         raise ValueError("patient split contains inconsistent seeds")
     assignment = {row["patient_id"]: row["greed_split"] for row in rows}
+    if len(assignment) != len(rows):
+        raise ValueError("patient split contains duplicate patient IDs")
+    if "" in assignment:
+        raise ValueError("patient split contains an empty patient ID")
     if set(assignment.values()) - {"train", "validation"}:
         raise ValueError("invalid greed_split")
     return assignment, seeds.pop()

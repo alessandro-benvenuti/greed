@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+from .atomic import write_json
 from .audit import audit, write_audit
 from .metadata import load_patch_index
 from .results import combine_partitions, merge_results
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     for name in ("audit", "split", "sample"):
         p = sub.add_parser(name); p.add_argument("--dataset-root"); p.add_argument("--output-root", required=True)
         p.add_argument("--patch-index")
+    sub.choices["audit"].add_argument("--workers", type=int, default=1)
     p = sub.choices["split"]; p.add_argument("--seed", type=int, default=314159)
     p = sub.choices["sample"]; p.add_argument("--split-file"); p.add_argument("--seed", type=int, default=271828)
     p.add_argument("--train-count", type=int, default=8000); p.add_argument("--validation-count", type=int, default=2000)
@@ -57,10 +59,15 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(merge_results(args.manifest, args.shard_dir, args.output, dataset, args.expected_count), indent=2)); return
     output = Path(args.output_root); patch_index = Path(args.patch_index) if args.patch_index else dataset / "patch_index.csv"
     records = load_patch_index(patch_index)
-    if args.command == "audit": write_audit(output, audit(records, dataset, patch_index)); return
+    if args.command == "audit": write_audit(output, audit(records, dataset, patch_index, args.workers)); return
     if args.command == "split": write_patient_split(output / "metadata/patient_split.csv", patient_split(records, args.seed), args.seed); return
     split_file = Path(args.split_file) if args.split_file else output / "metadata/patient_split.csv"
     assignment, _ = read_patient_split(split_file)
+    record_patients = {record.patient_id for record in records}
+    if set(assignment) != record_patients:
+        missing = record_patients - set(assignment)
+        extra = set(assignment) - record_patients
+        raise ValueError(f"patient split mismatch: {len(missing)} missing, {len(extra)} extra")
     train_rows, train_avail = sample_pairs(records, assignment, "train", args.train_count, args.seed, args.dataset_id, args.cost_config_id)
     val_rows, val_avail = sample_pairs(records, assignment, "validation", args.validation_count, args.seed, args.dataset_id, args.cost_config_id)
     write_manifest(output / "manifests/greed_train_pairs.csv", train_rows)
@@ -72,7 +79,13 @@ def main(argv: list[str] | None = None) -> None:
         for stratum in ("small", "medium", "large"):
             pilot.extend([r for r in train_rows + val_rows if r["sampling_strategy"] == strategy and r["size_stratum"] == stratum][:2])
     write_manifest(output / "manifests/pilot_pairs.csv", pilot)
-    print(json.dumps({"train": train_avail, "validation": val_avail}, indent=2, sort_keys=True))
+    availability = {
+        "sampling_seed": args.seed, "train_requested": args.train_count,
+        "validation_requested": args.validation_count, "train": train_avail,
+        "validation": val_avail,
+    }
+    write_json(output / "metadata/pair_sampling_availability.json", availability)
+    print(json.dumps(availability, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

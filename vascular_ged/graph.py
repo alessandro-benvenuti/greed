@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -77,12 +78,20 @@ def _load_ascii_vtp_arrays(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return coords, np.asarray(raw_edges, dtype=np.int64).reshape((-1, 2))
 
 
-def read_vtp_raw(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
-    """Return stored D/H/W coordinates and raw polyline segments before normalization."""
-    path = Path(path)
+@lru_cache(maxsize=1)
+def _pyvista_module():
     try:
         import pyvista as pv  # type: ignore
     except ImportError:
+        return None
+    return pv
+
+
+def read_vtp_raw(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Return stored D/H/W coordinates and raw polyline segments before normalization."""
+    path = Path(path)
+    pv = _pyvista_module()
+    if pv is None:
         return _load_ascii_vtp_arrays(path)
     mesh = pv.read(path)
     edges: list[tuple[int, int]] = []

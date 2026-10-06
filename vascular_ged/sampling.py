@@ -27,9 +27,13 @@ def stable_pair_id(a: str, b: str, dataset_id: str, cost_config_id: str) -> str:
 
 
 def assign_strata(records: list[GraphRecord]) -> dict[str, str]:
-    values = np.asarray([r.size for r in records], dtype=float)
-    q1, q2 = np.quantile(values, [1 / 3, 2 / 3])
-    return {r.sample_id: ("small" if r.size <= q1 else "medium" if r.size <= q2 else "large") for r in records}
+    # Rank-based thirds remain populated even when many patches have identical
+    # graph sizes; sample_id provides deterministic tie-breaking.
+    ordered = sorted(records, key=lambda record: (record.size, record.sample_id))
+    return {
+        record.sample_id: STRATA[min(2, index * 3 // len(ordered))]
+        for index, record in enumerate(ordered)
+    }
 
 
 def _quotas(total: int) -> dict[tuple[str, str], int]:
@@ -47,14 +51,16 @@ def sample_pairs(
     strata = assign_strata(selected)
     by_stratum: dict[str, list[GraphRecord]] = defaultdict(list)
     by_patch_stratum: dict[tuple[str, str], list[GraphRecord]] = defaultdict(list)
-    by_size_stratum: dict[tuple[str, int], list[GraphRecord]] = defaultdict(list)
+    by_size_stratum: dict[tuple[str, int, int], list[GraphRecord]] = defaultdict(list)
     for record in selected:
         stratum = strata[record.sample_id]
         by_stratum[stratum].append(record)
         by_patch_stratum[(stratum, record.patch_index)].append(record)
-        # Log-size buckets make size matching scale across the long graph-size tail.
-        bucket = int(np.floor(np.log2(record.size + 1)))
-        by_size_stratum[(stratum, bucket)].append(record)
+        # Bucket nodes and edges independently so equal total size cannot hide a
+        # large topology mismatch between the two components.
+        node_bucket = int(np.floor(np.log2(record.node_count + 1)))
+        edge_bucket = int(np.floor(np.log2(record.edge_count + 1)))
+        by_size_stratum[(stratum, node_bucket, edge_bucket)].append(record)
     rng = random.Random(f"{seed}:{split}")
     quotas = _quotas(count)
     rows: list[dict[str, object]] = []
@@ -65,7 +71,7 @@ def sample_pairs(
         if strategy == "corresponding_region":
             return [group for (s, _), group in by_patch_stratum.items() if s == stratum and len({r.patient_id for r in group}) >= 2]
         if strategy == "size_matched":
-            return [group for (s, _), group in by_size_stratum.items() if s == stratum and len({r.patient_id for r in group}) >= 2]
+            return [group for (s, _, _), group in by_size_stratum.items() if s == stratum and len({r.patient_id for r in group}) >= 2]
         return [by_stratum[stratum]]
 
     def different_patient_pairs(group: list[GraphRecord]) -> int:

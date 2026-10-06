@@ -1,8 +1,10 @@
 import csv
 from pathlib import Path
 
-from vascular_ged.metadata import GraphRecord
-from vascular_ged.sampling import MANIFEST_FIELDS, sample_pairs, stable_pair_id, write_manifest
+import pytest
+
+from vascular_ged.metadata import GraphRecord, load_patch_index
+from vascular_ged.sampling import MANIFEST_FIELDS, assign_strata, sample_pairs, stable_pair_id, write_manifest
 from vascular_ged.split import patient_split
 
 
@@ -38,3 +40,21 @@ def test_sampling_is_deterministic_unique_and_schema_complete(tmp_path: Path):
 
 def test_pair_id_is_unordered():
     assert stable_pair_id("a", "b", "d", "c") == stable_pair_id("b", "a", "d", "c")
+
+
+def test_equal_size_records_still_fill_all_strata():
+    tied = [GraphRecord(f"g{i}", f"p{i}", "0", f"train/vtp/g{i}.vtp", 2, 1) for i in range(9)]
+    strata = assign_strata(tied)
+    assert [list(strata.values()).count(name) for name in ("small", "medium", "large")] == [3, 3, 3]
+
+
+def test_patch_index_rejects_duplicate_samples_and_invalid_counts(tmp_path: Path):
+    header = "sample_id,patient_id,split,patch_index,node_count,edge_count\n"
+    duplicate = tmp_path / "duplicate.csv"
+    duplicate.write_text(header + "a,p1,train,0,1,0\na,p2,train,0,1,0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate training sample"):
+        load_patch_index(duplicate)
+    invalid = tmp_path / "invalid.csv"
+    invalid.write_text(header + "a,p1,train,0,1.5,0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="node_count"):
+        load_patch_index(invalid)
