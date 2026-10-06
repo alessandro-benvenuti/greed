@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-GREED_GIT_EXECUTABLE=$(command -v git || true)
+GREED_GIT_EXECUTABLE=${GREED_GIT_EXECUTABLE:-$(command -v git || true)}
 if [[ -z "$GREED_GIT_EXECUTABLE" ]]; then
-  echo "git must be available before loading the GREED Jean Zay environment" >&2
+  echo "set GREED_GIT_EXECUTABLE to the absolute Git path before submitting" >&2
+  exit 1
+fi
+if [[ ! -x "$GREED_GIT_EXECUTABLE" ]]; then
+  echo "GREED_GIT_EXECUTABLE is not executable: $GREED_GIT_EXECUTABLE" >&2
   exit 1
 fi
 module purge
