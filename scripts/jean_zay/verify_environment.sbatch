@@ -19,9 +19,12 @@ if [[ -z "$gurobi_c_library" ]]; then
 fi
 gurobi_link_name=$(basename "$gurobi_c_library" .so)
 gurobi_link_name=${gurobi_link_name#lib}
+mkdir -p pyged/build
+gurobi_smoke_binary="$GREED_REPOSITORY/pyged/build/gurobi_smoke"
+trap 'rm -f "$gurobi_smoke_binary"' EXIT
 g++ scripts/jean_zay/gurobi_smoke.cpp -std=c++17 -I"$GUROBI_HOME/include" -L"$GUROBI_HOME/lib" \
-  -Wl,-rpath,"$GUROBI_HOME/lib" -lgurobi_c++ -l"$gurobi_link_name" -o "$SLURM_TMPDIR/gurobi_smoke"
-"$SLURM_TMPDIR/gurobi_smoke"
+  -Wl,-rpath,"$GUROBI_HOME/lib" -lgurobi_c++ -l"$gurobi_link_name" -o "$gurobi_smoke_binary"
+"$gurobi_smoke_binary"
 pybind11_dir=$(python -m pybind11 --cmakedir)
 cmake -S pyged -B pyged/build -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$pybind11_dir"
 cmake --build pyged/build --parallel 1
