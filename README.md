@@ -124,8 +124,8 @@ vascular-ged analyze-pilot --shard-dir "$GED_COMPUTATIONS_ROOT/results/pilot/sha
 ```
 
 Do not submit production until the licence/build/stock-F2 smoke tests,
-handcrafted tests, finite ordered pilot bounds, timeout ceiling (300 seconds),
-CPU ceiling (833.34 hours), and concurrency checks all pass. Then record the
+handcrafted tests, finite ordered pilot bounds, selected timeout ceiling (60 seconds),
+CPU ceiling (166.67 hours), and concurrency checks all pass. Then record the
 selected setup and submit the resumable 25-pair array:
 
 ```bash
