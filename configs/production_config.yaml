@@ -1,7 +1,12 @@
 method: f2
-time_limit_seconds: 300
+time_limit_seconds: 60
 threads_per_pair: 1
 chunk_size: 25
-array_concurrency: 32
+array_concurrency: 8
 reuse_compatible_pilot_results: true
-# This file is a safe template. Replace timeout/concurrency only after pilot analysis.
+coordinate_scale: 1.0
+cost_config_id: vascular_3d_raw_v1
+similarity_lambda: 0.05
+bounded_labels: true
+# Selected from the validated 18-pair pilot: raw/60 matched raw/300 exactness
+# (88.9%) while reducing estimated CPU consumption from 105 to 31 hours.

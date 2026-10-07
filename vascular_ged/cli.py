@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--manifest", required=True); p.add_argument("--output", required=True); p.add_argument("--dataset-root")
     p.add_argument("--config", required=True); p.add_argument("--start", type=int, required=True); p.add_argument("--stop", type=int, required=True)
     p.add_argument("--method", choices=("f2", "branch"), default="f2"); p.add_argument("--timeout", type=int, default=300)
+    p.add_argument("--reuse-dir")
     p = sub.add_parser("merge")
     p.add_argument("--manifest", required=True); p.add_argument("--shard-dir", required=True); p.add_argument("--output", required=True)
     p.add_argument("--dataset-root"); p.add_argument("--expected-count", type=int, required=True)
@@ -56,7 +57,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "combine": print(json.dumps(combine_partitions(args.train, args.validation, args.output), indent=2)); return
     dataset = _dataset(getattr(args, "dataset_root", None))
     if args.command == "run-shard":
-        run_shard(args.manifest, args.output, dataset, args.config, args.start, args.stop, args.method, args.timeout); return
+        run_shard(
+            args.manifest, args.output, dataset, args.config, args.start, args.stop,
+            args.method, args.timeout, args.reuse_dir,
+        ); return
     if args.command == "merge":
         print(json.dumps(merge_results(args.manifest, args.shard_dir, args.output, dataset, args.expected_count), indent=2)); return
     output = Path(args.output_root); patch_index = Path(args.patch_index) if args.patch_index else dataset / "patch_index.csv"

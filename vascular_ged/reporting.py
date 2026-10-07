@@ -82,17 +82,31 @@ def analyze_pilot(shard_dir: str | Path, report_root: str | Path) -> dict[str, o
             "ged_size_correlation": float(np.corrcoef(uppers, sizes)[0, 1]) if len(group) > 1 else None,
             "similarity_exp_minus_lambda_ged": similarities,
         }
-    metrics = {"successful_rows": len(rows), "failed_rows": len(all_rows) - len(rows), "configurations": configurations,
-               "production_worst_case_cpu_hours_at_300_seconds": 10000 * 300 / 3600}
+    selection = {
+        "cost_config_id": "vascular_3d_raw_v1", "coordinate_scale": 1.0,
+        "solver": "f2", "timeout_seconds": 60, "threads_per_pair": 1,
+        "chunk_size": 25, "array_concurrency": 8, "bounded_labels": True,
+        "include_empty_graphs": False, "similarity_lambda": 0.05,
+        "pilot_exact_fraction": configurations["vascular_3d_raw_v1|f2|60"]["exact_fraction"],
+        "pilot_estimated_cpu_hours_10000": configurations["vascular_3d_raw_v1|f2|60"]["estimated_cpu_hours_10000_from_mean"],
+        "worst_case_cpu_hours": 10000 * 60 / 3600,
+        "rationale": "Raw/60 matched raw/300 exactness while using substantially less CPU; interval labels preserve non-exact bounds.",
+    }
+    metrics = {
+        "successful_rows": len(rows), "failed_rows": len(all_rows) - len(rows),
+        "configurations": configurations, "selected_production_configuration": selection,
+        "production_worst_case_cpu_hours_at_60_seconds": 10000 * 60 / 3600,
+    }
     (report_root / "reports").mkdir(parents=True, exist_ok=True)
     write_csv(report_root / "results/pilot/pilot_ged_results.csv", all_rows, list(all_rows[0]))
     write_json(report_root / "reports/solver_scaling_metrics.json", metrics)
     lines = ["# Solver scaling report", "", "This report compares F2/BRANCH, coordinate scaling, and 10/60/300-second limits.", "",
              f"Successful runs: {metrics['successful_rows']}; failed runs: {metrics['failed_rows']}.", "",
-             "The 300-second hard ceiling implies 833.33 CPU-hours for 10,000 pairs.", "", "## Configurations", ""]
+             "The selected 60-second hard ceiling implies 166.67 CPU-hours for 10,000 pairs.", "", "## Configurations", ""]
     for key, value in configurations.items():
         lines.append(f"- `{key}`: {json.dumps(value, sort_keys=True)}")
     lines += ["", "Production must not be launched until environment, licence, C++ build, stock F2, handcrafted tests, and finite-bound guardrails all pass."]
+    lines += ["", "## Selected production configuration", "", json.dumps(selection, indent=2, sort_keys=True)]
     (report_root / "reports/solver_scaling_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return metrics
 

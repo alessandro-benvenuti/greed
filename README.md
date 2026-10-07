@@ -141,6 +141,13 @@ The authoritative outputs are `ged_labels_train.csv`,
 summary. Generated artifacts, logs, environments, and checkpoints stay below
 `GED_COMPUTATIONS_ROOT` and outside Git.
 
+The validated pilot selected raw coordinate scaling, a 60-second F2 limit,
+25-pair shards, and array concurrency 8. This matched the 300-second pilot's
+exact fraction while materially reducing projected CPU use. Non-exact rows
+retain their lower/upper interval, and compatible raw/60 pilot rows are reused.
+For later exponential similarity experiments, the pilot selected
+`lambda = 0.05`; this calibration does not change the GED labels.
+
 ### Model and later integration
 
 The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses

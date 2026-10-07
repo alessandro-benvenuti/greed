@@ -70,11 +70,54 @@ def solve_row(row: dict[str, str], dataset_root: Path, cfg: dict, method: str, t
     return output
 
 
+def _reusable_results(
+    directory: str | Path | None, cost_config_id: str, method: str, timeout: int,
+) -> dict[str, dict[str, str]]:
+    if directory is None:
+        return {}
+    reusable: dict[str, dict[str, str]] = {}
+    for path in sorted(Path(directory).glob("*.csv")):
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if (
+                    row.get("cost_config_id") != cost_config_id
+                    or row.get("solver") != method
+                    or row.get("time_limit_seconds") != str(timeout)
+                    or row.get("solver_status") not in {"ok", "analytic_empty_graph"}
+                    or not all(field in row for field in RESULT_FIELDS)
+                ):
+                    continue
+                try:
+                    lower, upper = float(row["lower_bound"]), float(row["upper_bound"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not (math.isfinite(lower) and math.isfinite(upper) and lower <= upper):
+                    continue
+                pair_id = row.get("pair_id", "")
+                if not pair_id:
+                    continue
+                if pair_id in reusable:
+                    raise ValueError(f"duplicate reusable result for {pair_id}")
+                reusable[pair_id] = row
+    return reusable
+
+
 def run_shard(manifest: str | Path, output: str | Path, dataset_root: str | Path, config: str | Path,
-              start: int, stop: int, method: str, timeout: int) -> None:
+              start: int, stop: int, method: str, timeout: int,
+              reuse_dir: str | Path | None = None) -> None:
     with Path(manifest).open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))[start:stop]
     cfg = yaml.safe_load(Path(config).read_text())
-    solved = [solve_row(row, Path(dataset_root), cfg, method, timeout) for row in rows]
+    reusable = _reusable_results(reuse_dir, cfg["id"], method, timeout)
+    solved = []
+    for row in rows:
+        cached = reusable.get(row["pair_id"])
+        if cached is None:
+            solved.append(solve_row(row, Path(dataset_root), cfg, method, timeout))
+            continue
+        reused: dict[str, object] = dict(row)
+        reused["cost_config_id"] = cfg["id"]
+        reused.update({field: cached[field] for field in RESULT_FIELDS})
+        solved.append(reused)
     fields = list(rows[0]) + [field for field in RESULT_FIELDS if field not in rows[0]] if rows else list(RESULT_FIELDS)
     write_csv(output, solved, fields)

@@ -5,7 +5,7 @@
 #SBATCH --hint=nomultithread
 #SBATCH --cpus-per-task=1
 #SBATCH --time=02:15:00
-#SBATCH --array=0-399%32
+#SBATCH --array=0-399%8
 #SBATCH --output=%x-%A_%a.log
 set -euo pipefail
 source "${GREED_REPOSITORY:?GREED_REPOSITORY must point to the GREED checkout}/scripts/jean_zay/environment.sh"
@@ -26,8 +26,9 @@ fi
 mkdir -p "$shard_dir"
 output="$shard_dir/shard_${SLURM_ARRAY_TASK_ID}.csv"
 if python scripts/jean_zay/shard_complete.py "$output" \
-    --expected-rows "$chunk_size" --cost-config-id vascular_3d_raw_v1 --solver f2 --timeout 300; then
+    --expected-rows "$chunk_size" --cost-config-id vascular_3d_raw_v1 --solver f2 --timeout 60; then
   exit 0
 fi
 vascular-ged run-shard --manifest "$manifest" --config configs/cost_config.yaml \
-  --start "$local_start" --stop "$local_stop" --method f2 --timeout 300 --output "$output"
+  --start "$local_start" --stop "$local_stop" --method f2 --timeout 60 --output "$output" \
+  --reuse-dir "$GED_COMPUTATIONS_ROOT/results/pilot/shards"
