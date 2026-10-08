@@ -70,36 +70,45 @@ def solve_row(row: dict[str, str], dataset_root: Path, cfg: dict, method: str, t
     return output
 
 
-def _reusable_results(
-    directory: str | Path | None, cost_config_id: str, method: str, timeout: int,
+def _valid_reusable_row(
+    row: dict[str, str], cost_config_id: str, method: str, timeout: int,
+) -> bool:
+    if (
+        row.get("cost_config_id") != cost_config_id
+        or row.get("solver") != method
+        or row.get("time_limit_seconds") != str(timeout)
+        or row.get("solver_status") not in {"ok", "analytic_empty_graph"}
+        or not all(field in row for field in RESULT_FIELDS)
+    ):
+        return False
+    try:
+        lower, upper = float(row["lower_bound"]), float(row["upper_bound"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return bool(row.get("pair_id")) and math.isfinite(lower) and math.isfinite(upper) and lower <= upper
+
+
+def _reusable_results_from_paths(
+    paths: list[Path], cost_config_id: str, method: str, timeout: int,
 ) -> dict[str, dict[str, str]]:
-    if directory is None:
-        return {}
     reusable: dict[str, dict[str, str]] = {}
-    for path in sorted(Path(directory).glob("*.csv")):
+    for path in paths:
         with path.open(newline="", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
-                if (
-                    row.get("cost_config_id") != cost_config_id
-                    or row.get("solver") != method
-                    or row.get("time_limit_seconds") != str(timeout)
-                    or row.get("solver_status") not in {"ok", "analytic_empty_graph"}
-                    or not all(field in row for field in RESULT_FIELDS)
-                ):
+                if not _valid_reusable_row(row, cost_config_id, method, timeout):
                     continue
-                try:
-                    lower, upper = float(row["lower_bound"]), float(row["upper_bound"])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if not (math.isfinite(lower) and math.isfinite(upper) and lower <= upper):
-                    continue
-                pair_id = row.get("pair_id", "")
-                if not pair_id:
-                    continue
+                pair_id = row["pair_id"]
                 if pair_id in reusable:
                     raise ValueError(f"duplicate reusable result for {pair_id}")
                 reusable[pair_id] = row
     return reusable
+
+
+def _reusable_results(
+    directory: str | Path | None, cost_config_id: str, method: str, timeout: int,
+) -> dict[str, dict[str, str]]:
+    paths = [] if directory is None else sorted(Path(directory).glob("*.csv"))
+    return _reusable_results_from_paths(paths, cost_config_id, method, timeout)
 
 
 def run_shard(manifest: str | Path, output: str | Path, dataset_root: str | Path, config: str | Path,
@@ -109,6 +118,13 @@ def run_shard(manifest: str | Path, output: str | Path, dataset_root: str | Path
         rows = list(csv.DictReader(handle))[start:stop]
     cfg = yaml.safe_load(Path(config).read_text())
     reusable = _reusable_results(reuse_dir, cfg["id"], method, timeout)
+    output_path = Path(output)
+    if output_path.is_file():
+        # A failed shard may still contain valid expensive results. Preserve
+        # those rows and recompute only its failed or malformed entries.
+        previous = _reusable_results_from_paths([output_path], cfg["id"], method, timeout)
+        for pair_id, result in previous.items():
+            reusable.setdefault(pair_id, result)
     solved = []
     for row in rows:
         cached = reusable.get(row["pair_id"])
@@ -120,4 +136,9 @@ def run_shard(manifest: str | Path, output: str | Path, dataset_root: str | Path
         reused.update({field: cached[field] for field in RESULT_FIELDS})
         solved.append(reused)
     fields = list(rows[0]) + [field for field in RESULT_FIELDS if field not in rows[0]] if rows else list(RESULT_FIELDS)
-    write_csv(output, solved, fields)
+    write_csv(output_path, solved, fields)
+    failures = [row for row in solved if row.get("solver_status") == "failed"]
+    if failures:
+        raise RuntimeError(
+            f"shard contains {len(failures)} failed solver row(s); results were saved for a resumable retry"
+        )

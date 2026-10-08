@@ -139,3 +139,40 @@ def test_reused_row_schema_contains_all_result_fields(tmp_path: Path) -> None:
     with output.open(newline="", encoding="utf-8") as handle:
         row = next(csv.DictReader(handle))
     assert set(RESULT_FIELDS) <= set(row)
+
+
+def test_run_shard_reuses_successful_row_from_existing_partial_shard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, config, reuse_dir = _inputs(tmp_path)
+    output = tmp_path / "output.csv"
+    cached = _result_row(git_commit="previous-attempt")
+    write_csv(output, [cached], list(cached))
+
+    def unexpected_solve(*args, **kwargs):
+        raise AssertionError("a successful existing row must not be recomputed")
+
+    monkeypatch.setattr("vascular_ged.solver.solve_row", unexpected_solve)
+    run_shard(manifest, output, tmp_path, config, 0, 1, "f2", 60, reuse_dir)
+
+    with output.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["git_commit"] == "previous-attempt"
+
+
+def test_run_shard_saves_failures_and_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest, config, reuse_dir = _inputs(tmp_path)
+    failed = _result_row(
+        solver_status="failed", lower_bound="", upper_bound="", absolute_bound_gap="",
+        relative_bound_gap="", failure_message="GRBException: token server unavailable",
+    )
+    monkeypatch.setattr("vascular_ged.solver.solve_row", lambda *args, **kwargs: failed)
+    output = tmp_path / "output.csv"
+
+    with pytest.raises(RuntimeError, match="1 failed solver row"):
+        run_shard(manifest, output, tmp_path, config, 0, 1, "f2", 60, reuse_dir)
+
+    with output.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["solver_status"] == "failed"
+    assert "token server" in row["failure_message"]
