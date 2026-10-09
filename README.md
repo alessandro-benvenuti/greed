@@ -157,7 +157,11 @@ pair-independent embeddings. Exact rows regress to their point label; bounded
 rows use `ReLU(lower-prediction)^2 + ReLU(prediction-upper)^2`, never a midpoint.
 Canonical unaugmented coordinates are used for labels and this initial training;
 pair members are not independently rotated. Start the CPU pilot with
-`sbatch scripts/jean_zay/train_cpu.sbatch`.
+`sbatch scripts/jean_zay/train_preflight.sbatch`, followed only after success by
+`sbatch scripts/jean_zay/train_cpu.sbatch`. The loader preloads each unique VTP
+once rather than rereading graphs every epoch. Training uses atomic resumable
+checkpoints, gradient clipping, early stopping on validation interval loss, and
+reports performance against a constant-median exact-GED baseline.
 
 For later RelationFormer integration, load the learned encoder in the other
 repository and place prediction and GT in the same augmented coordinate frame.

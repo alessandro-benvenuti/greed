@@ -47,11 +47,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--dataset-root"); p.add_argument("--expected-count", type=int, required=True)
     p = sub.add_parser("combine")
     p.add_argument("--train", required=True); p.add_argument("--validation", required=True); p.add_argument("--output", required=True)
-    p = sub.add_parser("train"); p.add_argument("--config", required=True)
+    p = sub.add_parser("train"); p.add_argument("--config", required=True); p.add_argument("--preflight-only", action="store_true")
     p = sub.add_parser("analyze-pilot"); p.add_argument("--shard-dir", required=True); p.add_argument("--output-root", required=True)
     p = sub.add_parser("label-summary"); p.add_argument("--labels", nargs="+", required=True); p.add_argument("--output", required=True)
     args = parser.parse_args(argv)
-    if args.command == "train": train(args.config); return
+    if args.command == "train": train(args.config, args.preflight_only); return
     if args.command == "analyze-pilot": analyze_pilot(args.shard_dir, args.output_root); return
     if args.command == "label-summary": label_summary(args.labels, args.output); return
     if args.command == "combine": print(json.dumps(combine_partitions(args.train, args.validation, args.output), indent=2)); return
