@@ -144,6 +144,8 @@ def make_model(layers: int = 8, hidden: int = 64, embedding: int = 64):
 
 
 def _rank_metrics(target: np.ndarray, prediction: np.ndarray) -> tuple[float, float]:
+    if len(target) < 2 or np.ptp(target) == 0 or np.ptp(prediction) == 0:
+        return math.nan, math.nan
     try:
         from scipy.stats import kendalltau, spearmanr
         return float(spearmanr(target, prediction).statistic), float(kendalltau(target, prediction).statistic)

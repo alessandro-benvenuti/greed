@@ -8,7 +8,7 @@ torch = pytest.importorskip("torch")
 tg = pytest.importorskip("torch_geometric")
 
 from vascular_ged.atomic import write_csv
-from vascular_ged.training import VascularPairDataset, _evaluation_metrics, make_model
+from vascular_ged.training import VascularPairDataset, _evaluation_metrics, _rank_metrics, make_model
 
 
 def test_siamese_symmetry_self_distance_and_reload(tmp_path):
@@ -94,3 +94,9 @@ def test_evaluation_metrics_use_exact_rows_for_regression_and_ranking():
     assert metrics["exact_mae"] == pytest.approx(0.5)
     assert metrics["exact_rmse"] == pytest.approx(np.sqrt(0.5))
     assert metrics["exact_spearman"] == pytest.approx(1.0)
+
+
+def test_rank_metrics_report_undefined_constant_prediction_without_warning():
+    spearman, kendall = _rank_metrics(np.asarray([1.0, 2.0]), np.asarray([3.0, 3.0]))
+    assert np.isnan(spearman)
+    assert np.isnan(kendall)
