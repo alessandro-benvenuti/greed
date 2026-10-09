@@ -115,6 +115,9 @@ def label_summary(label_paths: list[str | Path], output: str | Path) -> None:
     rows = _rows(label_paths)
     if not rows:
         raise ValueError("no labels")
+    pair_ids = [row["pair_id"] for row in rows]
+    if len(set(pair_ids)) != len(pair_ids):
+        raise ValueError("label summary input contains duplicate pair IDs")
     lower = np.asarray([float(row["lower_bound"]) for row in rows]); upper = np.asarray([float(row["upper_bound"]) for row in rows])
     runtime = np.asarray([float(row["runtime_seconds"]) for row in rows]); exact = np.isclose(lower, upper)
     by_strategy = {key: sum(row["sampling_strategy"] == key for row in rows) for key in sorted({row["sampling_strategy"] for row in rows})}

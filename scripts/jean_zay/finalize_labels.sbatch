@@ -16,5 +16,5 @@ vascular-ged merge --manifest "$GED_COMPUTATIONS_ROOT/manifests/greed_validation
   --shard-dir "$production/validation_shards" --output "$production/ged_labels_validation.csv" --expected-count 2000
 vascular-ged combine --train "$production/ged_labels_train.csv" \
   --validation "$production/ged_labels_validation.csv" --output "$production/ged_labels_all.csv"
-vascular-ged label-summary --labels "$production/ged_labels_train.csv" "$production/ged_labels_validation.csv" "$production/ged_labels_all.csv" \
+vascular-ged label-summary --labels "$production/ged_labels_all.csv" \
   --output "$GED_COMPUTATIONS_ROOT/reports/label_dataset_summary.md"
