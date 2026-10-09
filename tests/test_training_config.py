@@ -25,3 +25,5 @@ def test_cpu_training_config_and_launchers_are_consistent() -> None:
     assert "--preflight-only" in preflight
     assert "--cpus-per-task=8" in preflight
     assert "--cpus-per-task=8" in training
+    assert "--mem" not in preflight
+    assert "--mem" not in training

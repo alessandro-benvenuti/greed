@@ -4,7 +4,6 @@
 #SBATCH --qos=qos_cpu-t4
 #SBATCH --hint=nomultithread
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
 #SBATCH --time=20:00:00
 #SBATCH --output=%x-%j.log
 set -euo pipefail
