@@ -163,6 +163,14 @@ once rather than rereading graphs every epoch. Training uses atomic resumable
 checkpoints, gradient clipping, early stopping on validation interval loss, and
 reports performance against a constant-median exact-GED baseline.
 
+After the pilot, `train_learning_curve.sbatch` runs a reproducible 12-job CPU
+array: nested, strategy/size-balanced training subsets of 1,000, 2,000, 4,000,
+and 8,000 pairs, each with three model seeds and the same 2,000 validation
+pairs. At most four jobs run concurrently. Submit
+`analyze_learning_curve.sbatch` with an `afterok` dependency on the array; it
+validates that every run is present and shares the same validation-set hash,
+then writes per-run CSV, aggregate JSON, and a Markdown learning-curve report.
+
 For later RelationFormer integration, load the learned encoder in the other
 repository and place prediction and GT in the same augmented coordinate frame.
 This branch intentionally keeps hard GT adjacency. Its encoder boundary can

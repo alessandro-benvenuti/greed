@@ -1,4 +1,7 @@
 seed: 161803
+subset_seed: 424242
+train_count: 8000
+validation_count: 2000
 dataset_root: ${SYNTHETIC_MRI_DATASET}
 train_labels: ${GED_COMPUTATIONS_ROOT}/results/production/ged_labels_train.csv
 validation_labels: ${GED_COMPUTATIONS_ROOT}/results/production/ged_labels_validation.csv
@@ -6,6 +9,7 @@ patient_split: ${GED_COMPUTATIONS_ROOT}/metadata/patient_split.csv
 cost_config_path: configs/cost_config.yaml
 cost_config_id: vascular_3d_raw_v1
 output_dir: ${GED_COMPUTATIONS_ROOT}/checkpoints/greed_3d_pilot
+report_path: ${GED_COMPUTATIONS_ROOT}/reports/greed_pilot_report.md
 model:
   layers: 8
   input_dim: 3

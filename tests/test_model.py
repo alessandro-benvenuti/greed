@@ -8,7 +8,9 @@ torch = pytest.importorskip("torch")
 tg = pytest.importorskip("torch_geometric")
 
 from vascular_ged.atomic import write_csv
-from vascular_ged.training import VascularPairDataset, _evaluation_metrics, _rank_metrics, make_model
+from vascular_ged.training import (
+    VascularPairDataset, _balanced_pair_subset, _evaluation_metrics, _rank_metrics, make_model,
+)
 
 
 def test_siamese_symmetry_self_distance_and_reload(tmp_path):
@@ -91,6 +93,10 @@ def test_evaluation_metrics_use_exact_rows_for_regression_and_ranking():
     assert metrics["interval_loss"] == pytest.approx(1 / 3)
     assert metrics["interval_coverage"] == pytest.approx(2 / 3)
     assert metrics["mean_interval_violation"] == pytest.approx(1 / 3)
+    assert metrics["exact_count"] == 2
+    assert metrics["bounded_count"] == 1
+    assert metrics["bounded_interval_coverage"] == pytest.approx(1.0)
+    assert metrics["bounded_mean_interval_violation"] == pytest.approx(0.0)
     assert metrics["exact_mae"] == pytest.approx(0.5)
     assert metrics["exact_rmse"] == pytest.approx(np.sqrt(0.5))
     assert metrics["exact_spearman"] == pytest.approx(1.0)
@@ -100,3 +106,22 @@ def test_rank_metrics_report_undefined_constant_prediction_without_warning():
     spearman, kendall = _rank_metrics(np.asarray([1.0, 2.0]), np.asarray([3.0, 3.0]))
     assert np.isnan(spearman)
     assert np.isnan(kendall)
+
+
+def test_balanced_pair_subsets_are_deterministic_nested_and_balanced():
+    rows = [
+        {"pair_id": f"{strategy}-{size}-{index}", "sampling_strategy": strategy, "size_stratum": size}
+        for strategy in ("corresponding_region", "size_matched", "unrestricted_random")
+        for size in ("small", "medium", "large")
+        for index in range(20)
+    ]
+    small = _balanced_pair_subset(rows, 53, 424242)
+    large = _balanced_pair_subset(rows, 107, 424242)
+    assert small == _balanced_pair_subset(rows, 53, 424242)
+    assert {row["pair_id"] for row in small} <= {row["pair_id"] for row in large}
+    cells = {}
+    for row in small:
+        key = row["sampling_strategy"], row["size_stratum"]
+        cells[key] = cells.get(key, 0) + 1
+    assert len(cells) == 9
+    assert max(cells.values()) - min(cells.values()) <= 1

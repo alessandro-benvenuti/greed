@@ -21,10 +21,39 @@ def sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _balanced_pair_subset(
+    rows: list[dict[str, str]], count: int | None, seed: int,
+) -> list[dict[str, str]]:
+    if count is None or count == len(rows):
+        return rows
+    if count <= 0 or count > len(rows):
+        raise ValueError(f"requested training subset has {count} rows, available rows: {len(rows)}")
+    cells = sorted({(row["sampling_strategy"], row["size_stratum"]) for row in rows})
+    if len(cells) != 9:
+        raise ValueError(f"expected nine strategy/stratum cells, found {len(cells)}")
+    quotas = {cell: count // len(cells) + (index < count % len(cells)) for index, cell in enumerate(cells)}
+    selected_ids: set[str] = set()
+    for cell in cells:
+        candidates = [row for row in rows if (row["sampling_strategy"], row["size_stratum"]) == cell]
+        ranked = sorted(
+            candidates,
+            key=lambda row: hashlib.sha256(f"{seed}\0{row['pair_id']}".encode()).digest(),
+        )
+        quota = quotas[cell]
+        if len(ranked) < quota:
+            raise ValueError(f"cell {cell} has only {len(ranked)} rows, requested {quota}")
+        selected_ids.update(row["pair_id"] for row in ranked[:quota])
+    selected = [row for row in rows if row["pair_id"] in selected_ids]
+    if len(selected) != count:
+        raise AssertionError(f"balanced subset produced {len(selected)} rows, expected {count}")
+    return selected
+
+
 class VascularPairDataset:
     def __init__(
         self, labels: str | Path, dataset_root: str | Path,
         expected_cost_config_id: str, expected_split: str | None = None,
+        pair_count: int | None = None, subset_seed: int = 0,
     ):
         import torch
         from torch_geometric.data import Data
@@ -34,6 +63,7 @@ class VascularPairDataset:
             self.rows = list(csv.DictReader(handle))
         if not self.rows:
             raise ValueError("label table is empty")
+        self.rows = _balanced_pair_subset(self.rows, pair_count, subset_seed)
         pair_ids = [row["pair_id"] for row in self.rows]
         if len(set(pair_ids)) != len(pair_ids):
             raise ValueError("label table contains duplicate pair IDs")
@@ -226,19 +256,24 @@ def _atomic_text(path: Path, value: str) -> None:
 
 def _evaluation_metrics(
     predictions: np.ndarray, lower: np.ndarray, upper: np.ndarray,
-) -> dict[str, float]:
+) -> dict[str, float | int]:
     if not (np.isfinite(predictions).all() and np.isfinite(lower).all() and np.isfinite(upper).all()):
         raise ValueError("evaluation inputs contain non-finite values")
     below = np.maximum(lower - predictions, 0)
     above = np.maximum(predictions - upper, 0)
     violation = below + above
     exact = np.isclose(lower, upper, atol=1e-9)
+    bounded = ~exact
     exact_target, exact_prediction = lower[exact], predictions[exact]
     spearman, kendall = _rank_metrics(exact_target, exact_prediction) if exact.any() else (math.nan, math.nan)
     return {
         "interval_loss": float(np.mean(below ** 2 + above ** 2)),
         "interval_coverage": float(np.mean(violation == 0)),
         "mean_interval_violation": float(np.mean(violation)),
+        "exact_count": int(exact.sum()),
+        "bounded_count": int(bounded.sum()),
+        "bounded_interval_coverage": float(np.mean(violation[bounded] == 0)) if bounded.any() else math.nan,
+        "bounded_mean_interval_violation": float(np.mean(violation[bounded])) if bounded.any() else math.nan,
         "exact_mae": float(np.mean(np.abs(exact_target - exact_prediction))) if exact.any() else math.nan,
         "exact_rmse": float(np.sqrt(np.mean((exact_target - exact_prediction) ** 2))) if exact.any() else math.nan,
         "exact_spearman": spearman,
@@ -260,11 +295,21 @@ def _constant_baseline(train_rows: list[dict[str, str]], val_rows: list[dict[str
     return {"constant_prediction": prediction, **metrics}
 
 
-def train(config_path: str | Path, preflight_only: bool = False) -> None:
+def train(
+    config_path: str | Path, preflight_only: bool = False, *, seed: int | None = None,
+    train_count: int | None = None, output_dir: str | Path | None = None,
+) -> None:
     import torch
     from torch_geometric.loader import DataLoader
     run_started = time.perf_counter()
     cfg = _expand(yaml.safe_load(Path(config_path).read_text()))
+    if seed is not None:
+        cfg["seed"] = seed
+    if train_count is not None:
+        cfg["train_count"] = train_count
+    if output_dir is not None:
+        cfg["output_dir"] = str(output_dir)
+        cfg["report_path"] = str(Path(output_dir) / "training_report.md")
     required_paths = ("dataset_root", "train_labels", "validation_labels", "patient_split", "cost_config_path")
     unresolved = [key for key in required_paths if "$" in str(cfg[key])]
     if unresolved:
@@ -291,12 +336,24 @@ def train(config_path: str | Path, preflight_only: bool = False) -> None:
     }
     train_set = VascularPairDataset(
         cfg["train_labels"], cfg["dataset_root"], cfg["cost_config_id"], "train",
+        int(cfg["train_count"]), int(cfg["subset_seed"]),
     )
     val_set = VascularPairDataset(
         cfg["validation_labels"], cfg["dataset_root"], cfg["cost_config_id"], "validation",
     )
-    if len(train_set) != 8000 or len(val_set) != 2000:
-        raise ValueError(f"expected 8000/2000 train/validation pairs, got {len(train_set)}/{len(val_set)}")
+    input_hashes.update({
+        "train_subset_pair_ids_sha256": hashlib.sha256(
+            "\n".join(row["pair_id"] for row in train_set.rows).encode()
+        ).hexdigest(),
+        "validation_pair_ids_sha256": hashlib.sha256(
+            "\n".join(row["pair_id"] for row in val_set.rows).encode()
+        ).hexdigest(),
+    })
+    if len(train_set) != int(cfg["train_count"]) or len(val_set) != int(cfg["validation_count"]):
+        raise ValueError(
+            f"expected {cfg['train_count']}/{cfg['validation_count']} train/validation pairs, "
+            f"got {len(train_set)}/{len(val_set)}"
+        )
     assignment = _patient_assignment(cfg["patient_split"])
     train_patients, val_patients = _validate_patient_assignment(train_set, val_set, assignment)
     split_train_count = sum(split == "train" for split in assignment.values())
@@ -398,6 +455,8 @@ def train(config_path: str | Path, preflight_only: bool = False) -> None:
             "validation_interval_loss": current,
             "validation_interval_coverage": metrics["interval_coverage"],
             "validation_mean_interval_violation": metrics["mean_interval_violation"],
+            "validation_bounded_interval_coverage": metrics["bounded_interval_coverage"],
+            "validation_bounded_mean_interval_violation": metrics["bounded_mean_interval_violation"],
             "validation_exact_mae": metrics["exact_mae"],
             "validation_exact_rmse": metrics["exact_rmse"],
             "validation_exact_spearman": metrics["exact_spearman"],
@@ -452,6 +511,7 @@ def train(config_path: str | Path, preflight_only: bool = False) -> None:
         "constant_validation_baseline": baseline,
         "epochs_completed": len(history), "stopped_early": stopped_early,
         "train_pair_count": len(train_set), "validation_pair_count": len(val_set),
+        "training_seed": int(cfg["seed"]), "training_subset_seed": int(cfg["subset_seed"]),
         "train_unique_graph_count": len(train_set.graphs), "validation_unique_graph_count": len(val_set.graphs),
         "train_patient_count": len(train_patients), "validation_patient_count": len(val_patients),
         "split_train_patient_count": split_train_count, "split_validation_patient_count": split_validation_count,
@@ -466,6 +526,98 @@ def train(config_path: str | Path, preflight_only: bool = False) -> None:
               f"Constant validation baseline: `{baseline}`",
               f"Best epoch metrics: `{best_metrics}`", f"Grouped validation interval violations: `{best_group_metrics}`",
               f"Peak memory bytes: {metadata['peak_memory_bytes']}", ""]
-    reports = Path(cfg["output_dir"]).parents[1] / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    _atomic_text(reports / "greed_pilot_report.md", "\n".join(report))
+    report_path = Path(cfg.get("report_path", output / "training_report.md"))
+    _atomic_text(report_path, "\n".join(report))
+
+
+def analyze_learning_curve(
+    experiment_root: str | Path, report_root: str | Path,
+    expected_counts: tuple[int, ...] = (1000, 2000, 4000, 8000),
+    expected_seeds: tuple[int, ...] = (161803, 271828, 314159),
+) -> dict[str, object]:
+    experiment_root, report_root = Path(experiment_root), Path(report_root)
+    metadata_paths = sorted(experiment_root.glob("pairs_*/seed_*/model_metadata.json"))
+    runs: list[dict[str, object]] = []
+    for path in metadata_paths:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        best = metadata["best_metrics"]
+        runs.append({
+            "train_pair_count": int(metadata["train_pair_count"]),
+            "training_seed": int(metadata["training_seed"]),
+            "best_epoch": int(best["epoch"]),
+            "validation_interval_loss": float(best["validation_interval_loss"]),
+            "validation_mean_interval_violation": float(best["validation_mean_interval_violation"]),
+            "validation_bounded_interval_coverage": float(best["validation_bounded_interval_coverage"]),
+            "validation_bounded_mean_interval_violation": float(best["validation_bounded_mean_interval_violation"]),
+            "validation_exact_mae": float(best["validation_exact_mae"]),
+            "validation_exact_rmse": float(best["validation_exact_rmse"]),
+            "validation_exact_spearman": float(best["validation_exact_spearman"]),
+            "validation_exact_kendall": float(best["validation_exact_kendall"]),
+            "epochs_completed": int(metadata["epochs_completed"]),
+            "total_job_runtime_seconds": float(metadata["total_job_runtime_seconds"]),
+            "peak_memory_bytes": int(metadata["peak_memory_bytes"]),
+            "slurm_job_id": metadata.get("slurm_job_id", ""),
+            "train_subset_pair_ids_sha256": metadata["train_subset_pair_ids_sha256"],
+            "validation_pair_ids_sha256": metadata["validation_pair_ids_sha256"],
+            "git_commit": metadata["git_commit"],
+        })
+    keys = [(row["train_pair_count"], row["training_seed"]) for row in runs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("learning-curve results contain duplicate pair-count/seed runs")
+    actual_counts = {int(row["train_pair_count"]) for row in runs}
+    if actual_counts != set(expected_counts):
+        raise ValueError(f"learning curve has pair counts {sorted(actual_counts)}, expected {list(expected_counts)}")
+    validation_hashes = {row["validation_pair_ids_sha256"] for row in runs}
+    if len(validation_hashes) != 1:
+        raise ValueError("learning-curve runs do not share one validation set")
+    commits = {row["git_commit"] for row in runs}
+    if len(commits) != 1:
+        raise ValueError("learning-curve runs were produced by different Git commits")
+    aggregates: dict[str, dict[str, float | int]] = {}
+    metric_names = (
+        "validation_interval_loss", "validation_mean_interval_violation",
+        "validation_bounded_interval_coverage", "validation_bounded_mean_interval_violation",
+        "validation_exact_mae", "validation_exact_rmse",
+        "validation_exact_spearman", "validation_exact_kendall",
+    )
+    for count in expected_counts:
+        group = [row for row in runs if row["train_pair_count"] == count]
+        actual_seeds = {int(row["training_seed"]) for row in group}
+        if actual_seeds != set(expected_seeds):
+            raise ValueError(f"pair count {count} has seeds {sorted(actual_seeds)}, expected {list(expected_seeds)}")
+        subset_hashes = {row["train_subset_pair_ids_sha256"] for row in group}
+        if len(subset_hashes) != 1:
+            raise ValueError(f"{count}-pair runs do not share one training subset")
+        summary: dict[str, float | int] = {"runs": len(group)}
+        for metric in metric_names:
+            values = np.asarray([float(row[metric]) for row in group])
+            if not np.isfinite(values).all():
+                raise ValueError(f"non-finite {metric} in {count}-pair runs")
+            summary[f"{metric}_mean"] = float(values.mean())
+            summary[f"{metric}_std"] = float(values.std(ddof=1))
+        aggregates[str(count)] = summary
+    report_root.mkdir(parents=True, exist_ok=True)
+    write_csv(report_root / "greed_learning_curve_runs.csv", runs, list(runs[0]))
+    result = {
+        "experiment_root": str(experiment_root.resolve()), "runs": len(runs),
+        "git_commit": next(iter(commits)),
+        "validation_pair_ids_sha256": next(iter(validation_hashes)), "aggregates": aggregates,
+    }
+    write_json(report_root / "greed_learning_curve_metrics.json", result)
+    lines = [
+        "# GREED 3D learning curve", "",
+        "All runs use the same 2,000-pair patient-disjoint validation set.", "",
+        "| Training pairs | Interval loss | Exact MAE | Exact RMSE | Spearman | Bounded coverage |",
+        "|---:|---:|---:|---:|---:|---:|",
+    ]
+    for count in expected_counts:
+        item = aggregates[str(count)]
+        lines.append(
+            f"| {count} | {item['validation_interval_loss_mean']:.4f} ± {item['validation_interval_loss_std']:.4f} "
+            f"| {item['validation_exact_mae_mean']:.4f} ± {item['validation_exact_mae_std']:.4f} "
+            f"| {item['validation_exact_rmse_mean']:.4f} ± {item['validation_exact_rmse_std']:.4f} "
+            f"| {item['validation_exact_spearman_mean']:.4f} ± {item['validation_exact_spearman_std']:.4f} "
+            f"| {item['validation_bounded_interval_coverage_mean']:.4f} ± {item['validation_bounded_interval_coverage_std']:.4f} |"
+        )
+    _atomic_text(report_root / "greed_learning_curve_report.md", "\n".join(lines) + "\n")
+    return result
