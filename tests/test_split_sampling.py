@@ -42,6 +42,29 @@ def test_pair_id_is_unordered():
     assert stable_pair_id("a", "b", "d", "c") == stable_pair_id("b", "a", "d", "c")
 
 
+def test_expansion_retains_original_pairs_and_fills_balanced_quotas():
+    data = records(); assignment = patient_split(data, 123)
+    original, _ = sample_pairs(data, assignment, 'train', 45, 456, 'dataset', 'cost')
+    extended, _ = sample_pairs(data, assignment, 'train', 180, 456, 'dataset', 'cost', initial_rows=original)
+    assert extended[:45] == original
+    assert len({row['pair_id'] for row in extended}) == 180
+    assert extended == sample_pairs(list(reversed(data)), assignment, 'train', 180, 456, 'dataset', 'cost', initial_rows=original)[0]
+    from collections import Counter
+    counts = Counter((r['sampling_strategy'], r['size_stratum']) for r in extended)
+    assert set(counts.values()) == {20}
+
+
+def test_expansion_rejects_changed_metadata_and_duplicate_retained_pairs():
+    data = records(); assignment = patient_split(data, 123)
+    original, _ = sample_pairs(data, assignment, 'train', 45, 456, 'dataset', 'cost')
+    with pytest.raises(ValueError, match='duplicate retained'):
+        sample_pairs(data, assignment, 'train', 180, 456, 'dataset', 'cost', initial_rows=original + original[:1])
+    changed = [dict(row) for row in original]
+    changed[0]['node_count_a'] = 999
+    with pytest.raises(ValueError, match='metadata mismatch'):
+        sample_pairs(data, assignment, 'train', 180, 456, 'dataset', 'cost', initial_rows=changed)
+
+
 def test_equal_size_records_still_fill_all_strata():
     tied = [GraphRecord(f"g{i}", f"p{i}", "0", f"train/vtp/g{i}.vtp", 2, 1) for i in range(9)]
     strata = assign_strata(tied)

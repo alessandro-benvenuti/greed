@@ -150,6 +150,19 @@ For later exponential similarity experiments, the pilot selected
 
 ### Model and later integration
 
+To extend the production labels to 50,000 training pairs, set `GREED_50K_ROOT`
+to a separate sibling directory (for example `GED_computations_50k`). Submit
+`prepare_50k.sbatch` first and inspect its output. It preserves the existing
+8,000 training pairs, all 2,000 validation pairs, and the patient split;
+the remaining 42,000 pairs fill the nine strategy/size quotas. After successful
+preparation and environment verification, submit `production_50k.sbatch`
+(840 tasks of 50 pairs, concurrency eight, F2 with a 60-second limit), then
+`finalize_50k.sbatch` with an `afterok` dependency on the array. Finalization
+requires all 50,000 successful training rows and combines them with the retained
+validation labels. Failed shards retain successful rows for a retry. Existing
+pilot outputs are preserved. These scripts compute labels; training is a
+separate subsequent step.
+
 The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses
 64 hidden/embedding dimensions, sum pooling, and Euclidean embedding distance,
 which guarantees symmetry, non-negativity, zero self-distance, and

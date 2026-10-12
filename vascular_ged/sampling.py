@@ -44,6 +44,7 @@ def _quotas(total: int) -> dict[tuple[str, str], int]:
 def sample_pairs(
     records: list[GraphRecord], assignment: dict[str, str], split: str, count: int, seed: int,
     dataset_id: str, cost_config_id: str, max_attempt_factor: int = 1000,
+    initial_rows: list[dict[str, object]] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
     selected = sorted((r for r in records if assignment.get(r.patient_id) == split and r.node_count > 0), key=lambda r: r.sample_id)
     if len(selected) < 2:
@@ -63,8 +64,39 @@ def sample_pairs(
         by_size_stratum[(stratum, node_bucket, edge_bucket)].append(record)
     rng = random.Random(f"{seed}:{split}")
     quotas = _quotas(count)
-    rows: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = [dict(row) for row in (initial_rows or [])]
     seen: set[tuple[str, str]] = set()
+    record_by_id = {record.sample_id: record for record in selected}
+    existing_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for row in rows:
+        a, b = record_by_id.get(row['sample_a']), record_by_id.get(row['sample_b'])
+        if a is None or b is None or a.patient_id == b.patient_id:
+            raise ValueError('retained pair is not eligible for this patient partition')
+        if row['greed_split'] != split or row['dataset_id'] != dataset_id or row['cost_config_id'] != cost_config_id:
+            raise ValueError('retained pair configuration mismatch')
+        if row['pair_id'] != stable_pair_id(a.sample_id, b.sample_id, dataset_id, cost_config_id):
+            raise ValueError('retained pair ID mismatch')
+        cell = (row['sampling_strategy'], row['size_stratum'])
+        if cell not in quotas or strata[a.sample_id] != cell[1] or strata[b.sample_id] != cell[1]:
+            raise ValueError('retained pair cell mismatch')
+        for graph, suffix in ((a, 'a'), (b, 'b')):
+            for field, value in (('patient', graph.patient_id), ('patch_index', graph.patch_index),
+                                 ('node_count', graph.node_count), ('edge_count', graph.edge_count),
+                                 ('graph_relative_path', graph.relative_path)):
+                key = f'graph_{suffix}_relative_path' if field == 'graph_relative_path' else f'{field}_{suffix}'
+                if str(row[key]) != str(value):
+                    raise ValueError(f'retained pair metadata mismatch: {key}')
+        if cell[0] == 'corresponding_region' and a.patch_index != b.patch_index:
+            raise ValueError('retained corresponding-region pair mismatch')
+        if cell[0] == 'size_matched' and (int(np.log2(a.node_count + 1)), int(np.log2(a.edge_count + 1))) != (int(np.log2(b.node_count + 1)), int(np.log2(b.edge_count + 1))):
+            raise ValueError('retained size-matched pair mismatch')
+        key = tuple(sorted((a.sample_id, b.sample_id)))
+        if key in seen:
+            raise ValueError('duplicate retained pair')
+        seen.add(key)
+        existing_counts[cell] += 1
+    if any(existing_counts[cell] > quota for cell, quota in quotas.items()):
+        raise ValueError('retained pairs exceed target cell quota')
     availability: dict[str, int] = {}
 
     def candidates(strategy: str, stratum: str) -> list[list[GraphRecord]]:
@@ -81,6 +113,7 @@ def sample_pairs(
         return len(group) * (len(group) - 1) // 2 - sum(n * (n - 1) // 2 for n in per_patient.values())
 
     for (strategy, stratum), quota in quotas.items():
+        quota -= existing_counts[(strategy, stratum)]
         groups = candidates(strategy, stratum)
         availability[f"{strategy}:{stratum}"] = sum(different_patient_pairs(group) for group in groups)
         produced = 0

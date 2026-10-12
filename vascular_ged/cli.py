@@ -17,6 +17,7 @@ from .sampling import MANIFEST_FIELDS, sample_pairs, write_manifest
 from .solver import run_shard
 from .split import patient_split, read_patient_split, write_patient_split
 from .training import analyze_learning_curve, train
+from .scaling import prepare_50k
 
 
 def _dataset(value: str | None) -> Path:
@@ -47,6 +48,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--dataset-root"); p.add_argument("--expected-count", type=int, required=True)
     p = sub.add_parser("combine")
     p.add_argument("--train", required=True); p.add_argument("--validation", required=True); p.add_argument("--output", required=True)
+    p.add_argument("--expected-train", type=int, default=8000); p.add_argument("--expected-validation", type=int, default=2000)
+    p = sub.add_parser("prepare-50k")
+    p.add_argument("--dataset-root"); p.add_argument("--source-root", required=True); p.add_argument("--output-root", required=True)
     p = sub.add_parser("train"); p.add_argument("--config", required=True); p.add_argument("--preflight-only", action="store_true")
     p.add_argument("--seed", type=int); p.add_argument("--train-count", type=int); p.add_argument("--output-dir")
     p = sub.add_parser("analyze-learning-curve")
@@ -60,7 +64,9 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(analyze_learning_curve(args.experiment_root, args.report_root), indent=2)); return
     if args.command == "analyze-pilot": analyze_pilot(args.shard_dir, args.output_root); return
     if args.command == "label-summary": label_summary(args.labels, args.output); return
-    if args.command == "combine": print(json.dumps(combine_partitions(args.train, args.validation, args.output), indent=2)); return
+    if args.command == "combine": print(json.dumps(combine_partitions(args.train, args.validation, args.output, args.expected_train, args.expected_validation), indent=2)); return
+    if args.command == "prepare-50k":
+        print(json.dumps(prepare_50k(_dataset(args.dataset_root), args.source_root, args.output_root), indent=2)); return
     dataset = _dataset(getattr(args, "dataset_root", None))
     if args.command == "run-shard":
         run_shard(
