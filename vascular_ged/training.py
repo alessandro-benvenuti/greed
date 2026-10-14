@@ -298,6 +298,7 @@ def _constant_baseline(train_rows: list[dict[str, str]], val_rows: list[dict[str
 def train(
     config_path: str | Path, preflight_only: bool = False, *, seed: int | None = None,
     train_count: int | None = None, output_dir: str | Path | None = None,
+    train_labels: str | None = None, validation_labels: str | None = None, patient_split: str | None = None,
 ) -> None:
     import torch
     from torch_geometric.loader import DataLoader
@@ -307,6 +308,9 @@ def train(
         cfg["seed"] = seed
     if train_count is not None:
         cfg["train_count"] = train_count
+    for key, value in (("train_labels", train_labels), ("validation_labels", validation_labels), ("patient_split", patient_split)):
+        if value is not None:
+            cfg[key] = value
     if output_dir is not None:
         cfg["output_dir"] = str(output_dir)
         cfg["report_path"] = str(Path(output_dir) / "training_report.md")
@@ -620,4 +624,51 @@ def analyze_learning_curve(
             f"| {item['validation_bounded_interval_coverage_mean']:.4f} ± {item['validation_bounded_interval_coverage_std']:.4f} |"
         )
     _atomic_text(report_root / "greed_learning_curve_report.md", "\n".join(lines) + "\n")
+    return result
+
+
+def analyze_50k(experiment_root: str | Path, baseline_root: str | Path, report_root: str | Path) -> dict:
+    experiment_root, baseline_root, report_root = Path(experiment_root), Path(baseline_root), Path(report_root)
+    seeds = (161803, 271828, 314159)
+    compared_settings = ('model', 'batch_size', 'epochs', 'learning_rate', 'weight_decay',
+                         'max_grad_norm', 'checkpoint_metric', 'early_stopping_patience',
+                         'early_stopping_min_delta', 'augmentation', 'cost_config_id')
+    baseline_runs = []
+    for seed in seeds:
+        old_dir = baseline_root / f'pairs_8000/seed_{seed}'
+        new_dir = experiment_root / f'pairs_50000/seed_{seed}'
+        old = json.loads((old_dir / 'model_metadata.json').read_text())
+        new = json.loads((new_dir / 'model_metadata.json').read_text())
+        if old['train_pair_count'] != 8000 or new['train_pair_count'] != 50000:
+            raise ValueError('comparison requires 8k and 50k training runs')
+        for metadata in (old, new):
+            if metadata['training_seed'] != seed or metadata['validation_pair_count'] != 2000:
+                raise ValueError('comparison seed or validation count mismatch')
+        for key in ('validation_pair_ids_sha256', 'validation_labels_sha256', 'cost_config_sha256', 'patient_split_sha256'):
+            if old[key] != new[key]:
+                raise ValueError(f'8k/50k comparison input mismatch: {key}')
+        old_cfg = yaml.safe_load((old_dir / 'resolved_config.yaml').read_text())
+        new_cfg = yaml.safe_load((new_dir / 'resolved_config.yaml').read_text())
+        if any(old_cfg[key] != new_cfg[key] for key in compared_settings):
+            raise ValueError('8k/50k model or training settings differ')
+        baseline_runs.append(old)
+    result = analyze_learning_curve(experiment_root, report_root, expected_counts=(50000,))
+    aggregate = result['aggregates']['50000']
+    comparison = {}
+    lines = ['# GREED 8k versus 50k', '', 'Three seeds; identical patient-disjoint validation labels and training settings.', '',
+             '| Metric | 8k mean ± SD | 50k mean ± SD | Change |', '|---|---:|---:|---:|']
+    for metric, label in (('validation_interval_loss', 'Interval loss'), ('validation_exact_mae', 'Exact MAE'),
+                          ('validation_exact_rmse', 'Exact RMSE'), ('validation_exact_spearman', 'Spearman'),
+                          ('validation_bounded_interval_coverage', 'Bounded coverage')):
+        values = np.asarray([r['best_metrics'][metric] for r in baseline_runs], dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError(f'non-finite baseline metric: {metric}')
+        old_mean, old_std = float(values.mean()), float(values.std(ddof=1))
+        new_mean, new_std = aggregate[f'{metric}_mean'], aggregate[f'{metric}_std']
+        comparison[metric] = {'baseline_mean': old_mean, 'baseline_std': old_std,
+                              'scaled_mean': new_mean, 'scaled_std': new_std, 'change': new_mean - old_mean}
+        lines.append(f'| {label} | {old_mean:.4f} ± {old_std:.4f} | {new_mean:.4f} ± {new_std:.4f} | {new_mean-old_mean:+.4f} |')
+    result['comparison_8k'] = comparison
+    write_json(report_root / 'greed_50k_comparison.json', result)
+    _atomic_text(report_root / 'greed_50k_comparison.md', '\n'.join(lines) + '\n')
     return result

@@ -163,6 +163,15 @@ validation labels. Failed shards retain successful rows for a retry. Existing
 pilot outputs are preserved. These scripts compute labels; training is a
 separate subsequent step.
 
+After 50k label finalization, `train_50k.sbatch` trains three seeds using the
+same architecture, optimizer, early stopping, and validation set as the 8k
+learning curve. Submit it once with `--array=0` and
+`--export=ALL,GREED_TRAIN_PREFLIGHT=1` for a full-dataset preflight, then submit
+the default three-task array with an `afterok` dependency on that preflight.
+Submit `analyze_50k.sbatch` after the training array; its comparison checks
+validation-label, cost, and patient-split hashes and training settings against
+each corresponding 8k run. Checkpoints and reports live under `GREED_50K_ROOT`.
+
 The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses
 64 hidden/embedding dimensions, sum pooling, and Euclidean embedding distance,
 which guarantees symmetry, non-negativity, zero self-distance, and

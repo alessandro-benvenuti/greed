@@ -3,7 +3,7 @@ import json
 import pytest
 
 from vascular_ged.atomic import write_json
-from vascular_ged.training import analyze_learning_curve
+from vascular_ged.training import analyze_50k, analyze_learning_curve
 
 
 def _metadata(count: int, seed: int) -> dict[str, object]:
@@ -53,3 +53,28 @@ def test_learning_curve_analysis_rejects_incomplete_results(tmp_path):
     write_json(tmp_path / "pairs_1000/seed_1/model_metadata.json", _metadata(1000, 1))
     with pytest.raises(ValueError, match="pair counts"):
         analyze_learning_curve(tmp_path, tmp_path / "reports")
+
+
+def test_50k_comparison_checks_inputs_and_compares_same_seeds(tmp_path):
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load((Path(__file__).parents[1] / 'configs/greed_training_config.yaml').read_text())
+    old_root, new_root, reports = (tmp_path / name for name in ('old', 'new', 'reports'))
+    for count, root in ((8000, old_root), (50000, new_root)):
+        for seed in (161803, 271828, 314159):
+            metadata = _metadata(count, seed)
+            metadata.update(validation_pair_count=2000, validation_labels_sha256='labels',
+                            cost_config_sha256='cost', patient_split_sha256='patients')
+            directory = root / f'pairs_{count}/seed_{seed}'
+            write_json(directory / 'model_metadata.json', metadata)
+            (directory / 'resolved_config.yaml').write_text(yaml.safe_dump(cfg))
+    result = analyze_50k(new_root, old_root, reports)
+    assert result['runs'] == 3
+    assert result['comparison_8k']['validation_exact_mae']['change'] < 0
+    assert (reports / 'greed_50k_comparison.md').is_file()
+    path = new_root / 'pairs_50000/seed_161803/model_metadata.json'
+    metadata = json.loads(path.read_text())
+    metadata['validation_labels_sha256'] = 'different'
+    write_json(path, metadata)
+    with pytest.raises(ValueError, match='input mismatch'):
+        analyze_50k(new_root, old_root, reports)
