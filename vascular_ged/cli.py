@@ -18,6 +18,7 @@ from .solver import run_shard
 from .split import patient_split, read_patient_split, write_patient_split
 from .training import analyze_50k, analyze_learning_curve, train
 from .scaling import prepare_50k
+from .diagnostics import diagnose_50k
 
 
 def _dataset(value: str | None) -> Path:
@@ -56,6 +57,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--train-labels"); p.add_argument("--validation-labels"); p.add_argument("--patient-split")
     p = sub.add_parser("analyze-50k")
     p.add_argument("--experiment-root", required=True); p.add_argument("--baseline-root", required=True); p.add_argument("--report-root", required=True)
+    p = sub.add_parser("diagnose-50k")
+    for name in ('experiment-root', 'validation-labels', 'patient-split', 'patch-index', 'report-root'):
+        p.add_argument(f'--{name}', required=True)
     p = sub.add_parser("analyze-learning-curve")
     p.add_argument("--experiment-root", required=True); p.add_argument("--report-root", required=True)
     p = sub.add_parser("analyze-pilot"); p.add_argument("--shard-dir", required=True); p.add_argument("--output-root", required=True)
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
               train_labels=args.train_labels, validation_labels=args.validation_labels, patient_split=args.patient_split); return
     if args.command == "analyze-50k":
         print(json.dumps(analyze_50k(args.experiment_root, args.baseline_root, args.report_root), indent=2)); return
+    if args.command == "diagnose-50k":
+        print(json.dumps(diagnose_50k(args.experiment_root, args.validation_labels, args.patient_split, args.patch_index, args.report_root), indent=2)); return
     if args.command == "analyze-learning-curve":
         print(json.dumps(analyze_learning_curve(args.experiment_root, args.report_root), indent=2)); return
     if args.command == "analyze-pilot": analyze_pilot(args.shard_dir, args.output_root); return

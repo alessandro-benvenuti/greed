@@ -172,6 +172,16 @@ Submit `analyze_50k.sbatch` after the training array; its comparison checks
 validation-label, cost, and patient-split hashes and training settings against
 each corresponding 8k run. Checkpoints and reports live under `GREED_50K_ROOT`.
 
+Before extending to 100k, `diagnose_50k.sbatch` reads the three 50k runs and
+writes `reports/pre_100k_diagnostics/diagnostics.md`, epoch curves, per-seed
+error breakdowns, and worst-pair tables. Exact GED tertiles and bounded-label
+width tertiles are evaluated separately. Reaching the epoch cap with a recent
+best epoch or >1% recent best-loss improvement flags a training-extension
+review; it does not prove lack of convergence. The job also inventories all
+patch-index splits for patients outside the existing GREED split. Such patients
+require provenance review before being designated as an independent test set.
+This diagnostic stage does not sample test pairs or launch more GED computation.
+
 The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses
 64 hidden/embedding dimensions, sum pooling, and Euclidean embedding distance,
 which guarantees symmetry, non-negativity, zero self-distance, and
