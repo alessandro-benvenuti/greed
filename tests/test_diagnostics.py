@@ -4,7 +4,7 @@ import json
 import pytest
 
 from vascular_ged.atomic import write_csv, write_json
-from vascular_ged.diagnostics import diagnose_50k, test_pool_inventory as inventory
+from vascular_ged.diagnostics import diagnose_50k, test_pool_inventory as inventory, write_test_inventory
 
 
 def test_inventory_excludes_all_used_patients_even_in_external_splits(tmp_path):
@@ -14,6 +14,10 @@ def test_inventory_excludes_all_used_patients_even_in_external_splits(tmp_path):
     result = inventory(index, split)
     assert result['candidate_patient_ids_outside_greed_split'] == ['3']
     assert result['overlap_with_greed_by_relationformer_split']['test'] == ['1']
+    write_test_inventory(index, split, tmp_path / 'reports')
+    text = (tmp_path / 'reports/test_patient_candidates.csv').read_text()
+    assert 'unknown_requires_run_records' in text
+    assert '3,test,1' in text
 
 
 def test_diagnostics_recompute_errors_and_flag_epoch_cap(tmp_path):
@@ -52,6 +56,20 @@ def test_diagnostics_recompute_errors_and_flag_epoch_cap(tmp_path):
         metadata['stopped_early'] = True
         write_json(path, metadata)
     assert diagnose_50k(root, labels, split, index, reports)['review_training_extension_before_100k'] is False
+    import shutil
+    continued = tmp_path / 'continued'
+    for seed in (161803, 271828):
+        source = root / f'pairs_50000/seed_{seed}'
+        metadata = json.loads((source / 'model_metadata.json').read_text())
+        metadata['train_labels_sha256'] = 'training-labels'
+        write_json(source / 'model_metadata.json', metadata)
+        destination = continued / f'pairs_50000/seed_{seed}'
+        shutil.copytree(source, destination)
+        metadata['continuation_source'] = str(source.resolve())
+        write_json(destination / 'model_metadata.json', metadata)
+    combined = diagnose_50k(root, labels, split, index, reports, continued)
+    assert [r['continued'] for r in combined['convergence']] == [True, True, False]
+    assert combined['overall_three_seed_metrics']['exact_mae']['mean'] == pytest.approx(1)
     metadata_path = root / 'pairs_50000/seed_161803/model_metadata.json'
     metadata = json.loads(metadata_path.read_text())
     metadata['validation_labels_sha256'] = 'wrong'

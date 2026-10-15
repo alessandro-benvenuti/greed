@@ -182,6 +182,28 @@ patch-index splits for patients outside the existing GREED split. Such patients
 require provenance review before being designated as an independent test set.
 This diagnostic stage does not sample test pairs or launch more GED computation.
 
+After reviewing diagnostics, `submit_next_stage.sh` submits two independent
+workflows and a provenance inventory. `extend_50k.sbatch` forks the capped seeds
+161803/271828 into separate checkpoint directories and continues to at most
+200 total epochs with unchanged optimizer, RNG state, best model, and early
+stopping counter. Original runs are preserved. The dependent extended report
+combines those two continuations with the already-stopped seed 314159.
+`test_patient_inventory.sbatch` exports candidate patients with original metadata
+splits; prior RelationFormer training/selection use and synthetic source identities
+still require run records before fixing the independent test set.
+
+In parallel, `prepare_100k.sbatch` expands the completed 50k experiment to 100k,
+retaining every old training pair and label and the same 2k validation set.
+It checks audited graph metadata from the original `GED_COMPUTATIONS_ROOT`.
+After preparation and environment verification, `production_100k.sbatch`
+computes just 50k new labels in 1,000 tasks of 50 pairs, concurrency eight.
+`finalize_100k.sbatch` requires complete successful results and writes 100k
+training / 2k validation labels under `GREED_100K_ROOT`. No 100k training is
+submitted by this stage. The submission helper writes every accepted job ID
+immediately to `GREED_50K_ROOT/metadata/next_stage_submission.env` and refuses
+duplicate initial submissions. If a submission fails partway through, inspect
+that record and recover only the missing stages.
+
 The loader consumes continuous `[N,3]` features. The shared eight-layer GIN uses
 64 hidden/embedding dimensions, sum pooling, and Euclidean embedding distance,
 which guarantees symmetry, non-negativity, zero self-distance, and

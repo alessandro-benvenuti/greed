@@ -17,7 +17,7 @@ from .sampling import MANIFEST_FIELDS, sample_pairs, write_manifest
 from .solver import run_shard
 from .split import patient_split, read_patient_split, write_patient_split
 from .training import analyze_50k, analyze_learning_curve, train
-from .scaling import prepare_50k
+from .scaling import prepare_50k, prepare_expansion
 from .diagnostics import diagnose_50k
 
 
@@ -52,14 +52,21 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--expected-train", type=int, default=8000); p.add_argument("--expected-validation", type=int, default=2000)
     p = sub.add_parser("prepare-50k")
     p.add_argument("--dataset-root"); p.add_argument("--source-root", required=True); p.add_argument("--output-root", required=True)
+    p = sub.add_parser('prepare-100k')
+    p.add_argument('--dataset-root'); p.add_argument('--source-root', required=True)
+    p.add_argument('--output-root', required=True); p.add_argument('--audit-root', required=True)
     p = sub.add_parser("train"); p.add_argument("--config", required=True); p.add_argument("--preflight-only", action="store_true")
     p.add_argument("--seed", type=int); p.add_argument("--train-count", type=int); p.add_argument("--output-dir")
     p.add_argument("--train-labels"); p.add_argument("--validation-labels"); p.add_argument("--patient-split")
+    p.add_argument('--epochs', type=int); p.add_argument('--resume-from')
     p = sub.add_parser("analyze-50k")
     p.add_argument("--experiment-root", required=True); p.add_argument("--baseline-root", required=True); p.add_argument("--report-root", required=True)
     p = sub.add_parser("diagnose-50k")
     for name in ('experiment-root', 'validation-labels', 'patient-split', 'patch-index', 'report-root'):
         p.add_argument(f'--{name}', required=True)
+    p.add_argument('--continued-root')
+    p = sub.add_parser('test-patient-inventory')
+    p.add_argument('--patch-index', required=True); p.add_argument('--patient-split', required=True); p.add_argument('--report-root', required=True)
     p = sub.add_parser("analyze-learning-curve")
     p.add_argument("--experiment-root", required=True); p.add_argument("--report-root", required=True)
     p = sub.add_parser("analyze-pilot"); p.add_argument("--shard-dir", required=True); p.add_argument("--output-root", required=True)
@@ -67,11 +74,15 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == "train":
         train(args.config, args.preflight_only, seed=args.seed, train_count=args.train_count, output_dir=args.output_dir,
-              train_labels=args.train_labels, validation_labels=args.validation_labels, patient_split=args.patient_split); return
+              train_labels=args.train_labels, validation_labels=args.validation_labels, patient_split=args.patient_split,
+              epochs=args.epochs, resume_from=args.resume_from); return
     if args.command == "analyze-50k":
         print(json.dumps(analyze_50k(args.experiment_root, args.baseline_root, args.report_root), indent=2)); return
     if args.command == "diagnose-50k":
-        print(json.dumps(diagnose_50k(args.experiment_root, args.validation_labels, args.patient_split, args.patch_index, args.report_root), indent=2)); return
+        print(json.dumps(diagnose_50k(args.experiment_root, args.validation_labels, args.patient_split, args.patch_index, args.report_root, args.continued_root), indent=2)); return
+    if args.command == 'test-patient-inventory':
+        from .diagnostics import write_test_inventory
+        print(json.dumps(write_test_inventory(args.patch_index, args.patient_split, args.report_root), indent=2)); return
     if args.command == "analyze-learning-curve":
         print(json.dumps(analyze_learning_curve(args.experiment_root, args.report_root), indent=2)); return
     if args.command == "analyze-pilot": analyze_pilot(args.shard_dir, args.output_root); return
@@ -79,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "combine": print(json.dumps(combine_partitions(args.train, args.validation, args.output, args.expected_train, args.expected_validation), indent=2)); return
     if args.command == "prepare-50k":
         print(json.dumps(prepare_50k(_dataset(args.dataset_root), args.source_root, args.output_root), indent=2)); return
+    if args.command == 'prepare-100k':
+        print(json.dumps(prepare_expansion(_dataset(args.dataset_root), args.source_root, args.output_root, 50000, 100000, args.audit_root), indent=2)); return
     dataset = _dataset(getattr(args, "dataset_root", None))
     if args.command == "run-shard":
         run_shard(

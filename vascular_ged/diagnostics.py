@@ -69,8 +69,42 @@ def test_pool_inventory(index: Path, patient_split: Path) -> dict:
     }
 
 
+def write_test_inventory(patch_index: str | Path, patient_split: str | Path, report_root: str | Path) -> dict:
+    index, split_path, report = map(Path, (patch_index, patient_split, report_root))
+    result = test_pool_inventory(index, split_path)
+    candidates = set(result['candidate_patient_ids_outside_greed_split'])
+    counts = Counter()
+    with index.open(newline='', encoding='utf-8') as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames or []
+        patient_key = _resolve(fields, None, 'patient_id')
+        split_key = _resolve(fields, None, 'relationformer_split', required=False)
+        for row in reader:
+            patient = row[patient_key].strip()
+            if patient in candidates:
+                original_split = row.get(split_key or '', 'train').strip().lower() or 'train'
+                counts[patient, original_split] += 1
+    rows = [dict(patient_id=patient, relationformer_metadata_split=split, patch_count=count,
+                 greed_training_or_validation=False, prior_relationformer_use='unknown_requires_run_records',
+                 proposed_test_status='candidate_only') for (patient, split), count in sorted(counts.items())]
+    report.mkdir(parents=True, exist_ok=True)
+    write_json(report / 'test_patient_inventory.json', result)
+    write_csv(report / 'test_patient_candidates.csv', rows,
+              ('patient_id', 'relationformer_metadata_split', 'patch_count', 'greed_training_or_validation',
+               'prior_relationformer_use', 'proposed_test_status'))
+    _atomic_text(report / 'test_patient_provenance.md', '\n'.join([
+        '# Candidate test-patient provenance', '', f"Candidate patients: {result['candidate_count']}", '',
+        'The CSV lists original patch-index splits. These are metadata assignments, not a record of actual model use.',
+        'Before fixing a test set, check patient lists and split files used by RelationFormer training and validation runs,',
+        'any checkpoint selection, and synthetic-data parent/source identities. Shared source patients must stay together.',
+        'Do not use test GED or downstream metrics to choose model settings. No test pairs have been sampled.', '',
+    ]))
+    return result
+
+
 def diagnose_50k(experiment_root: str | Path, validation_labels: str | Path,
-                 patient_split: str | Path, patch_index: str | Path, report_root: str | Path) -> dict:
+                 patient_split: str | Path, patch_index: str | Path, report_root: str | Path,
+                 continued_root: str | Path | None = None) -> dict:
     experiment, labels_path, split_path, report = map(Path, (experiment_root, validation_labels, patient_split, report_root))
     labels = _read(labels_path)
     by_id = {r['pair_id']: r for r in labels}
@@ -83,11 +117,18 @@ def diagnose_50k(experiment_root: str | Path, validation_labels: str | Path,
     width_cuts = np.quantile([float(r['upper_bound'])-float(r['lower_bound']) for r in bounded_rows], [1/3, 2/3]) if bounded_rows else []
     summaries, curves, breakdown, worst = [], [], [], []
     for seed in (161803, 271828, 314159):
-        directory = experiment / f'pairs_50000/seed_{seed}'
+        original_directory = experiment / f'pairs_50000/seed_{seed}'
+        directory = Path(continued_root) / f'pairs_50000/seed_{seed}' if continued_root is not None and seed != 314159 else original_directory
         metadata = json.loads((directory / 'model_metadata.json').read_text())
+        original_metadata = json.loads((original_directory / 'model_metadata.json').read_text())
         cfg = yaml.safe_load((directory / 'resolved_config.yaml').read_text())
         if metadata['training_seed'] != seed or metadata['train_pair_count'] != 50000:
             raise ValueError('diagnostics training run mismatch')
+        if directory != original_directory:
+            if metadata.get('continuation_source') != str(original_directory.resolve()):
+                raise ValueError('continued run does not identify its original source')
+            if metadata['train_labels_sha256'] != original_metadata['train_labels_sha256']:
+                raise ValueError('continued run changed its training labels')
         for key, path in (('validation_labels_sha256', labels_path), ('patient_split_sha256', split_path)):
             if metadata[key] != hashlib.sha256(path.read_bytes()).hexdigest():
                 raise ValueError(f'diagnostics input hash mismatch: {key}')
@@ -113,6 +154,9 @@ def diagnose_50k(experiment_root: str | Path, validation_labels: str | Path,
                    'recent_best_relative_improvement': recent_improvement,
                    'final_training_loss': float(train_losses[-1]), 'final_validation_loss': float(losses[-1]),
                    'best_validation_loss': float(metadata['best_validation_interval_loss']),
+                   'original_best_validation_loss': float(original_metadata['best_validation_interval_loss']),
+                   'best_loss_change': float(metadata['best_validation_interval_loss'])-float(original_metadata['best_validation_interval_loss']),
+                   'continued': directory != original_directory,
                    'extend_training_review': bool(review)}
         summaries.append(summary)
         curves.extend(dict(seed=seed, **r) for r in history)
@@ -151,9 +195,15 @@ def diagnose_50k(experiment_root: str | Path, validation_labels: str | Path,
                               lower_bound=row['lower_bound'], upper_bound=row['upper_bound'], prediction=row['prediction'],
                               interval_violation=max(float(row['lower_bound'])-float(row['prediction']), float(row['prediction'])-float(row['upper_bound']), 0)))
     inventory = test_pool_inventory(Path(patch_index), split_path)
+    overall = [r for r in breakdown if r['group'] == 'all']
+    overall_summary = {}
+    for metric in ('interval_loss', 'exact_mae', 'exact_rmse', 'exact_spearman', 'bounded_coverage'):
+        values = [r[metric] for r in overall]
+        overall_summary[metric] = {'mean': float(np.mean(values)), 'std': float(np.std(values, ddof=1))} if all(v is not None for v in values) else None
     result = {'convergence': summaries, 'review_training_extension_before_100k': any(r['extend_training_review'] for r in summaries),
               'exact_ged_tertile_cuts': exact_cuts.tolist(), 'bounded_width_tertile_cuts': list(width_cuts),
               'test_pool_inventory': inventory,
+              'overall_three_seed_metrics': overall_summary,
               'interpretation': 'Epoch-cap flag is a review heuristic, not proof of convergence. GED-range groups use exact labels; bounded widths are analyzed separately.'}
     report.mkdir(parents=True, exist_ok=True)
     write_json(report / 'diagnostics.json', result)
@@ -164,6 +214,12 @@ def diagnose_50k(experiment_root: str | Path, validation_labels: str | Path,
     lines = ['# 50k GREED diagnostics before 100k', '', '| Seed | Epochs | Best epoch | Early stopped | Epoch cap | Final train loss | Final val loss | Review extension |', '|---:|---:|---:|---|---|---:|---:|---|']
     for r in summaries:
         lines.append(f"| {r['seed']} | {r['epochs_completed']} | {r['best_epoch']} | {r['stopped_early']} | {r['hit_epoch_cap']} | {r['final_training_loss']:.4f} | {r['final_validation_loss']:.4f} | {r['extend_training_review']} |")
+    if continued_root is not None:
+        lines += ['', '| Seed | Original best loss | Selected best loss | Change |', '|---:|---:|---:|---:|']
+        for r in summaries:
+            lines.append(f"| {r['seed']} | {r['original_best_validation_loss']:.4f} | {r['best_validation_loss']:.4f} | {r['best_loss_change']:+.4f} |")
+        lines += ['', 'The early-stopped third seed is retained from the original run.',
+                  f'Three-seed aggregate metrics: `{json.dumps(overall_summary, sort_keys=True)}`']
     lines += ['', 'Extension review is flagged when training reaches its epoch limit with a recent best epoch or more than 1% recent best-loss improvement. It is a heuristic.', '',
               '| Group | Pairs per seed | Exact MAE (mean ± seed SD) | Interval violation (mean ± seed SD) | Bounded coverage (mean ± seed SD) | Mean bound width |', '|---|---:|---:|---:|---:|---:|']
     for name in sorted({r['group'] for r in breakdown}):

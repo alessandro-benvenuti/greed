@@ -6,7 +6,7 @@ import pytest
 from vascular_ged.atomic import write_csv, write_json
 from vascular_ged.metadata import GraphRecord
 from vascular_ged.sampling import sample_pairs, write_manifest
-from vascular_ged.scaling import prepare_50k
+from vascular_ged.scaling import prepare_50k, prepare_expansion
 from vascular_ged.split import patient_split, write_patient_split
 
 
@@ -49,3 +49,18 @@ def test_prepare_50k_preserves_labels_validation_and_split(tmp_path, monkeypatch
     assert read(source / 'results/production/ged_labels_train.csv') == read(output / 'results/production/train_shards/retained_8000.csv')
     with pytest.raises(FileExistsError):
         prepare_50k(dataset, source, output)
+    labels_50k = [dict(r, solver_status='ok', solver='f2', time_limit_seconds=60,
+                       lower_bound=1, upper_bound=1, is_exact=True) for r in expanded]
+    write_csv(output / 'results/production/ged_labels_train.csv', labels_50k, list(labels_50k[0]))
+    output_100k = tmp_path / 'scaled100'
+    expansion = prepare_expansion(dataset, output, output_100k, 50000, 100000, audit_root=source)
+    assert expansion['new_ged_pairs'] == 50000
+    full = read(output_100k / 'manifests/greed_train_pairs.csv')
+    assert len(full) == 100000
+    assert full[:50000] == expanded
+    assert len({r['pair_id'] for r in full}) == 100000
+    from collections import Counter
+    cells = Counter((r['sampling_strategy'], r['size_stratum']) for r in full)
+    assert max(cells.values()) - min(cells.values()) == 1
+    assert read(output_100k / 'results/production/train_shards/retained_50000.csv') == read(output / 'results/production/ged_labels_train.csv')
+    assert read(output_100k / 'results/production/ged_labels_validation.csv') == read(output / 'results/production/ged_labels_validation.csv')

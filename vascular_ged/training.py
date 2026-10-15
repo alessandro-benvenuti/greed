@@ -281,6 +281,39 @@ def _evaluation_metrics(
     }
 
 
+def _initialize_continuation(torch, source: Path, output: Path, cfg: dict, input_hashes: dict) -> None:
+    """Fork a capped run; only the epoch budget and output locations may change."""
+    source, output = source.resolve(), output.resolve()
+    if source == output or source in output.parents or output in source.parents:
+        raise ValueError('continuation must use a separate output directory')
+    state = torch.load(source / 'latest_checkpoint.pt', map_location='cpu', weights_only=False)
+    original = state['config']
+    expected = dict(original, epochs=cfg['epochs'], output_dir=cfg['output_dir'], report_path=cfg['report_path'])
+    if cfg != expected or state['input_hashes'] != input_hashes:
+        raise ValueError('continuation configuration or input hashes do not match the source')
+    if int(cfg['epochs']) <= int(original['epochs']) or int(state['epoch']) != int(original['epochs']):
+        raise ValueError('continuation requires a capped source and a larger epoch budget')
+    patience = int(cfg.get('early_stopping_patience', 0))
+    if patience and state['epochs_without_improvement'] >= patience:
+        raise ValueError('source already satisfied early stopping')
+    best = torch.load(source / 'best_model.pt', map_location='cpu', weights_only=False)
+    if best['input_hashes'] != input_hashes or best['config'] != original or best['epoch'] != state['best_metrics']['epoch']:
+        raise ValueError('source best checkpoint does not match the latest checkpoint')
+    prediction_text = (source / 'validation_predictions.csv').read_text(encoding='utf-8')
+    if any(output.iterdir()):
+        raise FileExistsError('new continuation directory must be empty')
+    for checkpoint in (state, best):
+        checkpoint['config'] = cfg
+    _atomic_torch_save(torch, best, output / 'best_model.pt')
+    _atomic_text(output / 'validation_predictions.csv', prediction_text)
+    write_json(output / 'continuation.json', {
+        'source_directory': str(source), 'source_checkpoint_sha256': sha256(source / 'latest_checkpoint.pt'),
+        'source_epoch': state['epoch'], 'new_epoch_limit': cfg['epochs'],
+    })
+    # Commit the latest checkpoint last so a partially initialized fork cannot resume.
+    _atomic_torch_save(torch, state, output / 'latest_checkpoint.pt')
+
+
 def _constant_baseline(train_rows: list[dict[str, str]], val_rows: list[dict[str, str]]) -> dict[str, float]:
     exact_train = [float(row["lower_bound"]) for row in train_rows if row["is_exact"].lower() in {"true", "1"}]
     if not exact_train:
@@ -299,13 +332,20 @@ def train(
     config_path: str | Path, preflight_only: bool = False, *, seed: int | None = None,
     train_count: int | None = None, output_dir: str | Path | None = None,
     train_labels: str | None = None, validation_labels: str | None = None, patient_split: str | None = None,
+    epochs: int | None = None, resume_from: str | Path | None = None,
 ) -> None:
     import torch
     from torch_geometric.loader import DataLoader
     run_started = time.perf_counter()
+    if preflight_only and resume_from is not None:
+        raise ValueError('continuation cannot be combined with preflight-only')
     cfg = _expand(yaml.safe_load(Path(config_path).read_text()))
     if seed is not None:
         cfg["seed"] = seed
+    if epochs is not None:
+        if epochs <= 0:
+            raise ValueError('epochs must be positive')
+        cfg['epochs'] = epochs
     if train_count is not None:
         cfg["train_count"] = train_count
     for key, value in (("train_labels", train_labels), ("validation_labels", validation_labels), ("patient_split", patient_split)):
@@ -416,6 +456,15 @@ def train(
     epochs_without_improvement = 0
     start_epoch = 1
     latest = output / "latest_checkpoint.pt"
+    if resume_from is not None:
+        if preflight_only or not bool(cfg.get('resume', True)):
+            raise ValueError('continuation requires resume enabled and a training run')
+        if latest.exists():
+            provenance = json.loads((output / 'continuation.json').read_text())
+            if provenance['source_directory'] != str(Path(resume_from).resolve()):
+                raise ValueError('continuation source changed')
+        else:
+            _initialize_continuation(torch, Path(resume_from), output, cfg, input_hashes)
     if bool(cfg.get("resume", True)) and latest.is_file():
         state = torch.load(latest, map_location="cpu", weights_only=False)
         if state.get("config") != cfg or state.get("input_hashes") != input_hashes:
@@ -486,7 +535,8 @@ def train(
             cuts = np.quantile(midpoint, [0, 1/3, 2/3, 1])
             for bin_index in range(3):
                 mask = (midpoint >= cuts[bin_index]) & (midpoint <= cuts[bin_index + 1] if bin_index == 2 else midpoint < cuts[bin_index + 1])
-                best_group_metrics[f"bound_midpoint_range:{bin_index}:{cuts[bin_index]:.6g}-{cuts[bin_index+1]:.6g}"] = float(np.mean(np.asarray([r["interval_violation"] for r in pred_rows], dtype=float)[mask]))
+                if mask.any():
+                    best_group_metrics[f"bound_midpoint_range:{bin_index}:{cuts[bin_index]:.6g}-{cuts[bin_index+1]:.6g}"] = float(np.mean(np.asarray([r["interval_violation"] for r in pred_rows], dtype=float)[mask]))
         else:
             epochs_without_improvement += 1
         state = {
@@ -516,6 +566,7 @@ def train(
         "epochs_completed": len(history), "stopped_early": stopped_early,
         "train_pair_count": len(train_set), "validation_pair_count": len(val_set),
         "training_seed": int(cfg["seed"]), "training_subset_seed": int(cfg["subset_seed"]),
+        "continuation_source": str(Path(resume_from).resolve()) if resume_from is not None else None,
         "train_unique_graph_count": len(train_set.graphs), "validation_unique_graph_count": len(val_set.graphs),
         "train_patient_count": len(train_patients), "validation_patient_count": len(val_patients),
         "split_train_patient_count": split_train_count, "split_validation_patient_count": split_validation_count,
